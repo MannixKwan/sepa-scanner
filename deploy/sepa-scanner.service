@@ -1,0 +1,18 @@
+# Linux (VPS / Raspberry Pi) systemd unit.
+#   sudo cp deploy/sepa-scanner.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now sepa-scanner
+#   journalctl -u sepa-scanner -f
+[Unit]
+Description=SEPA (Minervini) NASDAQ scanner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=sepa
+WorkingDirectory=/opt/sepa-scanner
+ExecStart=/opt/sepa-scanner/.venv/bin/python -m minervini run
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+# Your open positions. The scanner reminds you of the exit plan for each one.
+# If you enable IBKR sync (config.yaml -> positions.source: ibkr / both), shares and average
+# cost come from IBKR automatically; entries here then only add entry_date / stop / notes.
+#
+# positions:
+#   - ticker: NVDA
+#     shares: 100
+#     entry_price: 233.50
+#     entry_date: 2026-10-02     # optional, improves "highest close since entry" tracking
+#     stop: 225.80               # optional, defaults to entry - 7%
+#     notes: VCP breakout 3T
+
+positions: []

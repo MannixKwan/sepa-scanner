@@ -1,0 +1,68 @@
+# SEPA scanner on one Lightsail instance:  /opt/sepa/docker-compose.yml
+#   scanner     python -m minervini run  (scheduler + dashboard on :8050, internal only)
+#   caddy       HTTPS reverse proxy (Let's Encrypt) -> scanner:8050 - the only thing exposed
+#   ib-gateway  IB Gateway + IBC, read-only API, internal only (profile "ibkr": started once
+#               credentials exist - see `sepa-aws.sh credentials`)
+name: sepa
+
+services:
+  scanner:
+    build:
+      context: ./app
+      dockerfile: deploy/aws/Dockerfile
+    image: sepa-scanner:latest
+    restart: unless-stopped
+    user: "1000:1000"
+    env_file: .env
+    environment:
+      IBKR_HOST: ib-gateway
+      DASHBOARD_HOST: 0.0.0.0
+      HOME: /app/data                     # writable home for yfinance's cache (non-root user)
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./positions.yaml:/app/positions.yaml:ro
+      - ./data:/app/data
+      - ./site:/app/site
+    expose: ["8050"]
+    mem_limit: 2g
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy_data:/data
+      - ./caddy_config:/config
+    depends_on: [scanner]
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    profiles: ["ibkr"]
+    restart: unless-stopped
+    env_file: ib.env                      # TWS_USERID, TRADING_MODE (written by sepa-aws.sh credentials)
+    environment:
+      TWS_PASSWORD_FILE: /run/secrets/tws_password
+      READ_ONLY_API: "yes"                # the API can't place or change orders
+      TWOFA_TIMEOUT_ACTION: restart       # missed the IBKR Mobile push? retry
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      AUTO_RESTART_TIME: "11:59 PM"       # daily restart without 2FA (IBKR still asks ~weekly)
+      EXISTING_SESSION_DETECTED_ACTION: primary
+      TIME_ZONE: America/New_York
+      TZ: America/New_York
+      JAVA_HEAP_SIZE: "1024"
+      TWS_SETTINGS_PATH: /home/ibgateway/tws_settings
+    volumes:
+      - ./ib_settings:/home/ibgateway/tws_settings
+    secrets: [tws_password]
+    expose: ["4003", "4004"]              # never published to the internet
+    mem_limit: 1600m
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+
+secrets:
+  tws_password:
+    file: ./secrets/tws_password.txt

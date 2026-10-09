@@ -1,0 +1,9 @@
+pandas>=2.2
+numpy>=1.26
+yfinance>=0.2.54
+requests>=2.31
+PyYAML>=6.0
+lxml>=5.0
+exchange_calendars>=4.5
+python-dotenv>=1.0
+ib_async>=1.0        # optional: read-only Interactive Brokers sync

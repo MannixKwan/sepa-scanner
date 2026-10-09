@@ -1,0 +1,81 @@
+# SEPA scanner settings. Anything omitted falls back to the defaults in minervini/config.py.
+# Secrets (Telegram token, WhatsApp keys, dashboard URL/token) live in .env, not here.
+
+universe:
+  include_nyse: false          # true = also scan NYSE-listed stocks
+  min_price: 10                # Minervini avoids cheap, illiquid stocks
+  min_avg_volume: 200000       # 50-day average shares/day
+  min_avg_dollar_volume: 5000000
+  extra_tickers: []            # always analysed, e.g. [TSM, ANET]
+  benchmark: QQQ               # market-health proxy for the NASDAQ
+
+trend_template:                # Minervini's 8 criteria
+  min_above_52w_low: 0.30
+  max_below_52w_high: 0.25
+  min_rs_rating: 70
+  ma200_rising_days: 22
+
+vcp:
+  min_contractions: 2
+  max_contractions: 6
+  max_base_depth: 0.40         # deepest (first) correction allowed
+  max_final_depth: 0.12        # last contraction must be this tight
+  ready_within: 0.05           # READY = within 5% below the pivot
+  volume_dryup_ratio: 0.85
+
+trade:
+  buy_zone_pct: 0.05           # buy only up to 5% above the pivot
+  max_stop_pct: 0.08           # never risk more than 8% on the initial stop
+  breakout_volume_ratio: 1.4   # want breakout volume >= 140% of average
+
+risk:                          # position sizing & progressive exposure (Minervini's rules, your numbers)
+  capital_source: ibkr         # ibkr = size off your IBKR net liquidation (USD); fixed = account_equity
+  account_equity: 100000       # USD; used when capital_source is fixed or IBKR isn't reachable
+  risk_per_trade_pct: 0.0125   # "normal" mode: lose at most 1.25% of capital if the stop is hit
+  full_risk_per_trade_pct: 0.02  # "full" mode, only when your open trades are working (his max: 2.5%)
+  max_position_pct: 0.25       # a new position is at most 25% of capital (pilot mode: half that)
+  max_positions: 6             # concentrated book: 4-6 names (10-12 for large accounts)
+  max_open_risk_pct: 0.10      # if every stop were hit at once, lose at most 10% of capital
+  use_margin: false            # true = size against buying power instead of cash
+  mode: auto                   # auto, or force: pilot | normal | full | defensive
+  exposure_by_market: {uptrend: 1.0, pressure: 0.5, correction: 0.0}   # max % of capital invested
+  exposure_by_mode: {defensive: 0.0, pilot: 0.5, normal: 1.0, full: 1.0}
+
+fundamentals:
+  min_eps_growth: 0.25         # latest quarter EPS growth vs a year ago
+  min_sales_growth: 0.20       # ...or sales accelerating for 2+ quarters
+  require_for_top_picks: true
+
+positions:
+  source: ibkr                 # file | ibkr | both   (ibkr = read-only sync from TWS / IB Gateway;
+                               #  falls back to positions.yaml while IBKR isn't running)
+  file: positions.yaml
+  default_stop_pct: 0.07       # used when you haven't given a stop
+  breakeven_at_r: 2.0
+  lock_in_at_r: 3.0
+  partial_profit_at_r: 3.0
+  partial_profit_at_pct: 0.20
+  earnings_warning_days: 7
+
+ibkr:
+  host: 127.0.0.1
+  port: 4001                   # IB Gateway live 4001 / paper 4002; TWS live 7496 / paper 7497
+  client_id: 17
+
+schedule:
+  interval_minutes: 15
+  full_scan_after_close_minutes: 45
+  digest_times_et: ["09:45", "12:30", "15:45"]   # full digest at these New York times
+  send_every_run: false        # true = full digest every 15 minutes (alerts are always immediate)
+  evening_plan: true           # send "plan for next session" after the nightly scan
+
+notifications:
+  channels: [telegram]         # telegram, whatsapp_callmebot, whatsapp_twilio (any combination)
+  top_n: 5
+  local_timezone: Asia/Hong_Kong
+
+dashboard:
+  enabled: true
+  host: 0.0.0.0
+  port: 8050
+  watchlist_size: 30

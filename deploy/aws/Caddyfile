@@ -1,0 +1,11 @@
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy scanner:8050
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}

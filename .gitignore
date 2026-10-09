@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.env
+data/
+site/
+positions.yaml
+.DS_Store
+.idea/
+.vscode/
+*.pem

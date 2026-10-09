@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS auto-start: keeps the scanner running and restarts it if it stops.
+     Install:  cp deploy/com.sepa.scanner.plist ~/Library/LaunchAgents/
+               launchctl load ~/Library/LaunchAgents/com.sepa.scanner.plist
+     Stop:     launchctl unload ~/Library/LaunchAgents/com.sepa.scanner.plist
+     caffeinate -i keeps the Mac from idle-sleeping while the scanner runs (US hours are overnight in HK). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.sepa.scanner</string>
+  <key>WorkingDirectory</key><string>/Users/makwan/Documents/Project/Invest</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-i</string>
+    <string>/Users/makwan/Documents/Project/Invest/.venv/bin/python</string>
+    <string>-m</string>
+    <string>minervini</string>
+    <string>run</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+  <key>StandardOutPath</key><string>/Users/makwan/Documents/Project/Invest/data/launchd.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/makwan/Documents/Project/Invest/data/launchd.err.log</string>
+</dict>
+</plist>
