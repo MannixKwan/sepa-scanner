@@ -40,13 +40,14 @@ rsh() { ssh "${SSH_OPTS[@]}" "ubuntu@$IP" "$@"; }
 rsync_() { rsync -az -e "ssh ${SSH_OPTS[*]}" "$@"; }
 
 firewall() {
-  local me; me="$(my_ip)"
+  # your ISP/VPN may rotate the public IP within a block, so allow its /24 (override: SEPA_SSH_CIDR)
+  local me cidr; me="$(my_ip)"; cidr="${SEPA_SSH_CIDR:-${me%.*}.0/24}"
   ls_ put-instance-public-ports --instance-name "$NAME" --port-infos "[
-    {\"fromPort\":22,\"toPort\":22,\"protocol\":\"tcp\",\"cidrs\":[\"$me/32\"],\"cidrListAliases\":[\"lightsail-connect\"]},
+    {\"fromPort\":22,\"toPort\":22,\"protocol\":\"tcp\",\"cidrs\":[\"$cidr\"],\"cidrListAliases\":[\"lightsail-connect\"]},
     {\"fromPort\":80,\"toPort\":80,\"protocol\":\"tcp\",\"cidrs\":[\"0.0.0.0/0\"],\"ipv6Cidrs\":[\"::/0\"]},
     {\"fromPort\":443,\"toPort\":443,\"protocol\":\"tcp\",\"cidrs\":[\"0.0.0.0/0\"],\"ipv6Cidrs\":[\"::/0\"]}
   ]" >/dev/null
-  echo "firewall: 80/443 open; SSH only from $me (and the Lightsail browser console)"
+  echo "firewall: 80/443 open; SSH only from $cidr (and the Lightsail browser console)"
 }
 
 cmd_plan() {
