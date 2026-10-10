@@ -51,7 +51,7 @@ services:
       TWOFA_TIMEOUT_ACTION: restart       # missed the IBKR Mobile push? retry
       RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
       AUTO_RESTART_TIME: "11:59 PM"       # daily restart without 2FA (IBKR still asks ~weekly)
-      EXISTING_SESSION_DETECTED_ACTION: primary
+      EXISTING_SESSION_DETECTED_ACTION: primaryoverride   # your own IBKR Mobile/TWS/Portal login always wins
       TIME_ZONE: America/New_York
       TZ: America/New_York
       JAVA_HEAP_SIZE: "1024"
