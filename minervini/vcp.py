@@ -57,8 +57,10 @@ def detect_vcp(df: pd.DataFrame, cfg: dict, end_offset: int = 1) -> dict | None:
             break
 
     contractions = [(peaks[k], troughs[k]) for k in range(len(troughs))]
-    # A pullback that started less than a week ago is noise, not a contraction yet.
-    while len(contractions) > 1 and (n - 1 - contractions[-1][0]) < vc["min_final_contraction_bars"]:
+    # The last pullback is noise, not a contraction, if it only just started or was a one-day dip.
+    while len(contractions) > 1 and (
+            (n - 1 - contractions[-1][0]) < vc["min_final_contraction_bars"]
+            or (contractions[-1][1] - contractions[-1][0]) < vc["min_final_pullback_bars"]):
         contractions.pop()
     if not contractions:
         return None

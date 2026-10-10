@@ -106,6 +106,16 @@ class VcpTest(unittest.TestCase):
         self.assertFalse(v["valid"], v)
         self.assertGreater(v["pivot"], 90)          # the 1-day dip's high (~84) is not taken as the pivot
 
+    def test_short_tight_final_pullback_counts(self):
+        # NSIT-like: shakeout from the high, then a 4-session 4% pullback near the top of the base
+        px = list(np.linspace(40, 100, 260))
+        for a_, b_, n_ in [(100, 90.5, 2), (90.5, 97.5, 8), (97.5, 92, 3), (92, 97.8, 4), (97.8, 94, 4), (94, 96.5, 1)]:
+            px += leg(a_, b_, n_)
+        v = detect_vcp(frame(px), CFG, end_offset=1)
+        self.assertTrue(v["valid"], v)
+        self.assertLessEqual(v["final_depth"], 0.05)
+        self.assertLess(v["pivot_below_base_high"], 0.03)
+
     def test_tight_base_far_below_highs_is_not_a_vcp(self):
         # contractions shrink (26% -> 5%) but the last one tightens 14% below the base high
         px = list(np.linspace(40, 100, 260))

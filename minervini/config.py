@@ -35,7 +35,8 @@ DEFAULTS: dict = {
         "max_final_depth": 0.12,        # last contraction must be tight
         "min_contraction_depth": 0.02,  # ignore wiggles smaller than this
         "min_base_days": 15,            # ~3 weeks
-        "min_final_contraction_bars": 5,  # the last pullback must have lasted >= 1 week
+        "min_final_contraction_bars": 3,  # the last pullback started >= 3 sessions ago...
+        "min_final_pullback_bars": 2,     # ...and took >= 2 sessions to reach its low (no one-day dips)
         "max_pivot_below_base_high": 0.10,  # pivot must be near the top of the base
         "max_base_days": 260,           # ~1 year
         "ready_within": 0.05,           # "READY" when within 5% below pivot
