@@ -5,6 +5,7 @@
 #   deploy/aws/sepa-aws.sh up            create on first run, otherwise push code/config and restart
 #   deploy/aws/sepa-aws.sh credentials   store your IBKR login on the server and start IB Gateway
 #   deploy/aws/sepa-aws.sh ibkr-check    test the server's IBKR connection
+#   deploy/aws/sepa-aws.sh ibkr-restart  log IB Gateway in again with the stored login (2FA prompt follows)
 #   deploy/aws/sepa-aws.sh status        containers, recent log lines, dashboard URL
 #   deploy/aws/sepa-aws.sh logs [svc]    follow logs: scanner (default) | ib-gateway | caddy
 #   deploy/aws/sepa-aws.sh ssh           shell on the server
@@ -181,6 +182,13 @@ cmd_ibkr_check() {
   rsh "cd $R && sudo docker compose exec -T scanner python -m minervini ibkr-check"
 }
 
+cmd_ibkr_restart() {
+  IP="$(server_ip)"; [ -n "$IP" ] || die "not deployed"
+  rsh "test -s $R/secrets/tws_password.txt" || die "no IBKR login stored yet - run: $0 credentials"
+  rsh "cd $R && sudo docker compose --profile ibkr up -d --force-recreate ib-gateway" 2>&1 | tail -1
+  echo ">>> Approve the IB Gateway login on IBKR Mobile now (you have ~3 minutes), then: $0 ibkr-check"
+}
+
 cmd_status() {
   IP="$(server_ip)"; [ -n "$IP" ] || die "not deployed"
   rsh "cd $R && sudo docker compose --profile ibkr ps --format 'table {{.Service}}\t{{.Status}}' \
@@ -209,10 +217,11 @@ case "${1:-}" in
   up) cmd_up ;;
   credentials) cmd_credentials ;;
   ibkr-check) cmd_ibkr_check ;;
+  ibkr-restart) cmd_ibkr_restart ;;
   status) cmd_status ;;
   logs) shift; cmd_logs "${1:-scanner}" ;;
   ssh) cmd_ssh ;;
   allow-ip) cmd_allow_ip ;;
   destroy) cmd_destroy ;;
-  *) sed -n '2,15p' "$0"; exit 1 ;;
+  *) sed -n '2,16p' "$0"; exit 1 ;;
 esac

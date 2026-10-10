@@ -48,6 +48,7 @@ services:
     environment:
       TWS_PASSWORD_FILE: /run/secrets/tws_password
       READ_ONLY_API: "yes"                # the API can't place or change orders
+      TWOFA_DEVICE: "IB Key"              # IBKR Mobile push; a passkey can't be used on a headless server
       TWOFA_TIMEOUT_ACTION: restart       # missed the IBKR Mobile push? retry
       RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
       AUTO_RESTART_TIME: "11:59 PM"       # daily restart without 2FA (IBKR still asks ~weekly)
