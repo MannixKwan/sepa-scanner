@@ -9,7 +9,7 @@ from minervini.edgar import quarterly
 from minervini.fundamentals import _accel, _growth
 from minervini.positions import evaluate
 from minervini.strategy import analyze
-from minervini.technicals import add_indicators, rs_ratings, trend_template
+from minervini.technicals import add_indicators, rs_ratings, trend_template, volume_profile
 from minervini.vcp import detect_vcp, find_setup
 
 CFG = {k: dict(v) if isinstance(v, dict) else v for k, v in DEFAULTS.items()}
@@ -128,6 +128,32 @@ class VcpTest(unittest.TestCase):
 
     def test_new_highs_have_no_base(self):
         self.assertIsNone(detect_vcp(frame(np.linspace(40, 100, 300)), CFG))
+
+
+class VolumeProfileTest(unittest.TestCase):
+    def _series(self, big_move, big_vol, small_move, small_vol, n=160):
+        px, vol = [50.0], [1e6]
+        for i in range(1, n):
+            big = i % 5 == 0
+            px.append(px[-1] * (1 + (big_move if big else small_move)))
+            vol.append(big_vol if big else small_vol)
+        return frame(px, vol)
+
+    def test_accumulation_grades_a(self):
+        # +2% days on 3M shares, quiet -0.5% days on 0.5M: up on volume, down on light volume
+        vp = volume_profile(self._series(0.02, 3e6, -0.005, 0.5e6), CFG)
+        self.assertEqual(vp["grade"], "A", vp)
+        self.assertGreater(vp["heavy_up"], 5)
+        self.assertEqual(vp["heavy_down"], 0)
+
+    def test_distribution_grades_e(self):
+        vp = volume_profile(self._series(-0.02, 3e6, 0.005, 0.5e6), CFG)
+        self.assertEqual(vp["grade"], "E", vp)
+
+    def test_even_volume_is_neutral(self):
+        vp = volume_profile(frame(np.linspace(40, 60, 160), np.full(160, 1e6)), CFG)
+        self.assertIn(vp["grade"], ("B", "C"))   # no heavy days either way
+        self.assertEqual(vp["heavy_up"] + vp["heavy_down"], 0)
 
 
 class ExitRulesTest(unittest.TestCase):

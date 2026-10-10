@@ -154,7 +154,7 @@ def _summary(cfg, mode, market, rows, positions, counts, portfolio, industries) 
                 "partial_profit_at_pct", "climax_gain_pct", "climax_days")},
             "local_timezone": cfg["notifications"]["local_timezone"],
             "rules": {k: cfg[k] for k in ("universe", "trend_template", "vcp", "trade", "risk", "positions",
-                                          "schedule", "fundamentals")},
+                                          "schedule", "fundamentals", "volume")},
             "top_n": cfg["notifications"]["top_n"],
             "watchlist_size": cfg["dashboard"]["watchlist_size"],
         },

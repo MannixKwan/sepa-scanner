@@ -71,6 +71,9 @@ signal), so the 15-minute job fetches only those and finishes in seconds.
 * **Trend Template (8/8):** price > 150 & 200-day MA; 150 > 200; 200-day rising ≥ 1 month;
   50 > 150 & 200; price > 50-day; ≥ 30% above the 52-week low; within 25% of the 52-week high; RS ≥ 70.
 * **VCP:** 2–6 contractions, first ≤ 40%, last ≤ 12%, base ≥ 3 weeks, volume drying up.
+* **Volume behaviour (graded A–E, never a filter):** up/down volume ratio over 50 days and heavy-volume
+  (≥ 1.5× average, ≥ 1% move) up days vs down days over 13 weeks. Accumulation lifts the score;
+  distribution lowers it and adds a warning.
 * **Fundamentals:** latest-quarter EPS ≥ +25% YoY (or loss → profit) and sales ≥ +20% or accelerating.
   Bonus for acceleration, margin expansion, beats, and Code 33.
 * **Entry:** buy-stop at the pivot, ideally on volume ≥ 140% of average, never > 5% above the pivot.

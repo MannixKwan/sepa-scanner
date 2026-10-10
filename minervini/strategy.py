@@ -6,7 +6,7 @@ from datetime import date
 
 import pandas as pd
 
-from .technicals import trend_template
+from .technicals import trend_template, volume_profile
 from .vcp import find_setup
 
 # Order used to rank the watchlist.
@@ -107,6 +107,7 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
     price_new_high = bool(df["high"].iloc[-1] >= df["high"].iloc[-252:].max())
 
     sma50_falling = bool(len(df) > 70 and df["sma50"].iloc[-1] < df["sma50"].iloc[-22])
+    vp = volume_profile(df, cfg, exclude_last=vol_fraction < 1.0)
     m = (fund or {}).get("metrics", {})
     days_to_earn = _days_until((fund or {}).get("next_earnings"))
     pivot_dist = (price / setup["pivot"] - 1) if setup else None
@@ -117,7 +118,8 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
         prox = int(100 - 50 * min(abs(pivot_dist) / vc["ready_within"], 1))
     vcp_q = setup["quality"] if setup and setup["valid"] else 0
     fund_s = m.get("score", 30) if fund else 30
-    score = 0.25 * (rs or 0) + 0.30 * vcp_q + 0.30 * fund_s + 0.15 * prox
+    vol_s = vp["score"] if vp else 50
+    score = 0.20 * (rs or 0) + 0.25 * vcp_q + 0.30 * fund_s + 0.10 * vol_s + 0.15 * prox
     score += 3 if rs_new_high else 0
     score += 5 if m.get("code33") else 0
     score -= 8 if sma50_falling else 0
@@ -136,6 +138,9 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
         reasons.append(f"{setup['count']}-contraction VCP over {setup['base_weeks']:g} weeks: {dep}")
         if setup["vol_dryup"] <= vc["volume_dryup_ratio"]:
             reasons.append(f"Volume dried up to {setup['vol_dryup']:.0%} of average in the last contraction")
+    if vp and vp["grade"] in ("A", "B"):
+        reasons.append(f"Accumulation (volume grade {vp['grade']}): up/down volume {vp['ud_ratio']:.1f}, "
+                       f"{vp['heavy_up']} heavy-volume up days vs {vp['heavy_down']} down in {vp['weeks']} weeks")
     if m.get("eps_q_yoy") is not None:
         acc = f", accelerating {m['eps_accel_qtrs']} qtrs" if m.get("eps_accel_qtrs", 0) >= 2 else ""
         reasons.append(f"Latest quarter EPS {m['eps_q_yoy']:+.0%} YoY{acc}")
@@ -156,6 +161,13 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
         flags.append(f"Earnings in {days_to_earn} day{'s' if days_to_earn != 1 else ''} - avoid opening a new position right before the report")
     if sma50_falling:
         flags.append("50-day MA lower than a month ago - the uptrend is stalling")
+    if vp and vp["grade"] in ("D", "E"):
+        flags.append(f"Distribution (volume grade {vp['grade']}): {vp['heavy_down']} heavy-volume down days vs "
+                     f"{vp['heavy_up']} up in {vp['weeks']} weeks; up/down volume {vp['ud_ratio']:.1f}")
+    elif vp and vp["biggest_day"]["change"] <= -0.02 and (vp["biggest_day"]["ratio"] or 0) >= 2:
+        b = vp["biggest_day"]
+        flags.append(f"Heaviest volume in {vp['weeks']} weeks was a selling day ({b['date']}, "
+                     f"{b['change']:+.1%} on {b['ratio']:.1f}× average)")
     if status == "EXTENDED":
         flags.append("Extended beyond the buy zone - don't chase")
     if status in ("BREAKOUT", "BUY ZONE") and setup and setup.get("breakout_days_ago") == 0 and vol_ratio < tr["breakout_volume_ratio"]:
@@ -185,6 +197,7 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
         "date": df.index[-1].strftime("%Y-%m-%d"),
         "rs": rs,
         "rs_new_high": rs_new_high,
+        "volume_profile": vp,
         "tt": tt,
         "setup": setup,
         "status": status,

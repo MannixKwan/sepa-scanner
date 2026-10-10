@@ -35,6 +35,16 @@ const STATUS = {
 const ACTION = { EXIT: "critical", "SELL PARTIAL": "good", TIGHTEN: "serious", HOLD: "" };
 const REGIME = { uptrend: "good", pressure: "warning", correction: "critical" };
 const MODE_KIND = { defensive: "critical", pilot: "info", normal: "good", full: "good" };
+const GRADE_KIND = { A: "good", B: "good", C: "", D: "warning", E: "critical" };
+const GRADE_HELP = {
+  A: "Strong accumulation: heavy volume on up days, light volume on pullbacks.",
+  B: "Accumulation: more volume on up days than down days.",
+  C: "Neutral: no clear volume edge either way.",
+  D: "Distribution: selling volume outweighs buying.",
+  E: "Heavy distribution: repeated big-volume selling days.",
+};
+const gradeOf = (r) => r.volume_profile?.grade ?? r.acc_grade;
+const gradeChip = (g) => (g ? chip(GRADE_KIND[g] || "", g, GRADE_HELP[g] || "") : "–");
 const chip = (kind, text, title = "") => `<span class="chip ${kind}" title="${esc(title)}"><span class="dot"></span>${esc(text)}</span>`;
 const statusChip = (s) => chip((STATUS[s] || [""])[0], (STATUS[s] || [s, s])[1], S?.status_help?.[s] || "");
 
@@ -130,7 +140,7 @@ function pickCard(r) {
       <div><div class="tk">${esc(r.ticker)}</div><div class="nm" title="${esc(r.name)}">${esc(r.name)}</div></div>
       <div class="px"><b class="num">${fmt.px(r.price)}</b><div class="num ${dir(r.change_pct)}">${fmt.pct(r.change_pct)}</div></div>
     </div>
-    <div class="facts">${statusChip(r.status)}<span class="tag">${pivotText(r)}</span><span class="tag">Score ${r.score}</span></div>
+    <div class="facts">${statusChip(r.status)}<span class="tag">${pivotText(r)}</span><span class="tag">Score ${r.score}</span>${gradeOf(r) ? `<span class="tag" title="${esc(GRADE_HELP[gradeOf(r)])}">Volume ${gradeOf(r)}</span>` : ""}</div>
     ${meter(p.stop, p.entry, p.buy_zone_hi, r.price)}
     <div class="kv num">
       <div><div class="k">Buy above</div><div class="v">${fmt.px(p.entry)}</div></div>
@@ -213,6 +223,7 @@ const COLS = {
   eps: { key: "eps_q_yoy", label: "EPS qtr", sort: (r) => (r.fund ? r.fund.eps_q_yoy : r.eps_q_yoy), f: (r) => fmt.pct(r.fund ? r.fund.eps_q_yoy : r.eps_q_yoy, 0) },
   sales: { key: "sales_q_yoy", label: "Sales qtr", sort: (r) => (r.fund ? r.fund.sales_q_yoy : r.sales_q_yoy), f: (r) => fmt.pct(r.fund ? r.fund.sales_q_yoy : r.sales_q_yoy, 0) },
   vcp: { key: "vcp", label: "VCP", sort: (r) => (r.setup?.valid ? r.setup.count : r.vcp_count), f: (r) => { const c = r.setup?.valid ? r.setup.count : r.vcp_count; const d = r.setup?.valid ? r.setup.final_depth : r.final_depth; return c ? `${c}T · ${fmt.pct(d, 0, false)}` : "–"; } },
+  vol: { key: "acc", label: "Volume", sort: (r) => r.volume_profile?.score ?? r.acc_score, f: (r) => gradeChip(gradeOf(r)) },
   earn: { key: "days_to_earnings", label: "Earnings", f: (r) => (r.days_to_earnings == null ? "–" : r.days_to_earnings < 0 ? "–" : r.days_to_earnings + "d") },
   score: { key: "score", label: "Score", f: (r) => `<b>${r.score}</b>` },
   offhigh: { key: "pct_below_high", label: "Off high", f: (r) => fmt.pct(-(r.pct_below_high ?? 0), 1) },
@@ -252,7 +263,7 @@ function viewHome() {
   ${pos.length && !act.length ? `<h2>Your positions <span class="sub">no exit signals</span></h2><div class="grid cards">${pos.map((p) => positionCard(p, true)).join("")}</div>` : ""}
 
   <h2>Watchlist <span class="sub">VCP bases - breakouts, ready and forming (${S.watchlist.length})</span></h2>
-  ${S.watchlist.length ? table("wl", S.watchlist, [COLS.ticker, COLS.status, COLS.price, COLS.chg, COLS.pivot, COLS.rs, COLS.eps, COLS.sales, COLS.vcp, COLS.earn, COLS.score], { key: "status", asc: true })
+  ${S.watchlist.length ? table("wl", S.watchlist, [COLS.ticker, COLS.status, COLS.price, COLS.chg, COLS.pivot, COLS.rs, COLS.eps, COLS.sales, COLS.vol, COLS.vcp, COLS.earn, COLS.score], { key: "status", asc: true })
     : `<div class="panel empty">No VCP bases right now.</div>`}
 
   <h2>Leading industries <span class="sub">most stocks passing the Trend Template</span></h2>
@@ -378,7 +389,7 @@ function viewAll() {
       <div class="seg">${Object.entries(F).map(([k, [lab]]) => `<button data-f="${k}" class="${allFilter.f === k ? "on" : ""}">${lab}</button>`).join("")}</div>
       <span class="muted">${rows.length} shown</span>
     </div>
-    ${table("all", rows, [COLS.ticker, COLS.status, COLS.price, COLS.chg, COLS.rs, COLS.offhigh, COLS.eps, COLS.sales, COLS.vcp, COLS.earn, COLS.score, COLS.ind], { key: "score", asc: false })}`;
+    ${table("all", rows, [COLS.ticker, COLS.status, COLS.price, COLS.chg, COLS.rs, COLS.offhigh, COLS.eps, COLS.sales, COLS.vol, COLS.vcp, COLS.earn, COLS.score, COLS.ind], { key: "score", asc: false })}`;
   const qi = $("#q");
   qi.addEventListener("input", () => { allFilter.q = qi.value; const pos = qi.selectionStart; viewAll(); const n = $("#q"); n.focus(); n.setSelectionRange(pos, pos); });
   app.querySelectorAll("[data-f]").forEach((b) => b.addEventListener("click", () => { allFilter.f = b.dataset.f; viewAll(); }));
@@ -465,9 +476,10 @@ function viewRules() {
     <tr><td class="l">Liquidity</td><td class="l wrap">Price ≥ $${u.min_price}, ≥ ${fmt.int(u.min_avg_volume)} shares and ≥ ${fmt.usd(u.min_avg_dollar_volume)} traded a day</td><td>${fmt.int(c.liquid)}</td></tr>
     <tr><td class="l">Trend Template</td><td class="l wrap">All 8 checks: price above the 50/150/200-day averages; 150 above 200; 200-day rising ≥ 1 month; 50 above 150 and 200; ≥ ${P(tt.min_above_52w_low)} above the 52-week low; within ${P(tt.max_below_52w_high)} of the 52-week high; RS rating ≥ ${tt.min_rs_rating}</td><td>${fmt.int(c.tt_pass)}</td></tr>
     <tr><td class="l">VCP base</td><td class="l wrap">${vc.min_contractions}–${vc.max_contractions} pullbacks, each shallower than the last; first ≤ ${P(vc.max_base_depth)}, last ≤ ${P(vc.max_final_depth)}, at least ${vc.min_final_contraction_bars} sessions old and not a one-day dip; base ≥ ${Math.round(vc.min_base_days / 5)} weeks; pivot within ${P(vc.max_pivot_below_base_high)} of the base high</td><td>${fmt.int(c.vcp)}</td></tr>
+    <tr><td class="l">Volume behaviour</td><td class="l wrap">Graded A–E from the up/down volume ratio (${R.volume?.ud_window_days ?? 50} days) and heavy-volume up vs down days (${Math.round((R.volume?.heavy_window_days ?? 65) / 5)} weeks). Adjusts the score - not a filter</td><td>A–E</td></tr>
     <tr><td class="l">Fundamentals</td><td class="l wrap">Latest quarter EPS ≥ +${P(fd.min_eps_growth)} vs a year ago (or loss → profit), and sales ≥ +${P(fd.min_sales_growth)} or accelerating</td><td>pass / below</td></tr>
   </tbody></table></div>
-  <p>The <b>RS rating</b> (1–99) ranks the stock's 12-month performance against every NASDAQ stock, with the latest quarter counted double. Each stock's <b>score</b> blends RS (25%), base quality (30% - a tight last pullback, drying-up volume, a shallow base), fundamentals (30%) and closeness to the buy point (15%), minus a penalty if the 50-day average is falling.
+  <p>The <b>RS rating</b> (1–99) ranks the stock's 12-month performance against every NASDAQ stock, with the latest quarter counted double. Each stock's <b>score</b> blends RS (20%), base quality (25% - a tight last pullback, drying-up volume, a shallow base), fundamentals (30%), volume behaviour (10%) and closeness to the buy point (15%), minus a penalty if the 50-day average is falling.
   <b>Watchlist</b> = the top ${st.watchlist_size} stocks with a base. <b>Stocks to watch</b> (the ${st.top_n} in your messages) = Breakout, Buy zone or Ready, fundamentals pass, and no earnings in the next 3 days.</p>
 
   <h2>2 · Status labels</h2>
@@ -482,6 +494,7 @@ function viewRules() {
     <li><b>Base:</b> markers <i>Base high</i>, <i>C1, C2, C3</i> with each pullback's depth - they should shrink - and <i>Pivot</i> at the high of the last one, which should be near the top of the base.</li>
     <li><b>Lines:</b> dashed black <i>Pivot</i>, green <i>Max buy</i> (+${P(tr.buy_zone_pct)}), red <i>Stop</i>.</li>
     <li><b>Volume:</b> grey = normal, <b style="color:var(--series-1)">blue</b> = heavy buying day, <b style="color:var(--critical)">red</b> = heavy selling day (≥ ${tr.breakout_volume_ratio}× average). Volume should shrink in the last pullback and spike blue on the breakout.</li>
+    <li><b>Volume grade</b> (stock page, tables, messages): <b>A/B</b> = accumulation - heavy volume on up days, light on pullbacks; <b>C</b> = neutral; <b>D/E</b> = distribution - heavy-volume selling. A stock with D/E can still set up, but it has to prove itself with a high-volume breakout.</li>
     <li><b>RS line</b> (below the chart): the stock vs QQQ. Rising = beating the market; a new high before price breaks out is a leadership tell.</li>
     <li><b>Fundamentals:</b> quarterly EPS and revenue with growth vs a year ago; <b>bold</b> = growth speeding up.</li>
   </ul>
@@ -567,6 +580,7 @@ async function viewDetail(t) {
       <div class="panel">${fundPanel(f, r)}</div>
       <div class="grid">
         <div class="panel">${ttPanel(r.tt)}</div>
+        <div class="panel">${volPanel(r.volume_profile)}</div>
         <div class="panel">${vcpPanel(r.setup)}</div>
       </div>
     </div>`;
@@ -606,6 +620,20 @@ function whyPanel(r) {
 function ttPanel(tt) {
   if (!tt || !tt.checks?.length) return `<h3>Trend Template</h3><p class="muted">${esc(tt?.reason || "Not enough history.")}</p>`;
   return `<h3>Trend Template · ${tt.score}/8</h3><ul class="list checks">${tt.checks.map((c) => `<li>${c.pass ? ICON.ok : ICON.no}<span>${esc(c.label)}</span><span class="d num">${esc(c.detail)}</span></li>`).join("")}</ul>`;
+}
+
+function volPanel(v) {
+  if (!v) return `<h3>Volume behaviour</h3><p class="muted">Not enough history.</p>`;
+  const b = v.biggest_day || {};
+  return `<h3>Volume behaviour · ${chip(GRADE_KIND[v.grade] || "", "Grade " + v.grade)}</h3>
+    <p class="ink2">${esc(GRADE_HELP[v.grade] || "")} Big funds can't hide their size, so volume shows whether they're buying or selling.</p>
+    <div class="tiles num">
+      ${tile("Up/down volume", v.ud_ratio.toFixed(2), "50 days · above 1 = buyers")}
+      ${tile("Heavy up days", v.heavy_up, `${v.weeks} wks · ≥ 1.5× avg, ≥ +1%`)}
+      ${tile("Heavy down days", v.heavy_down, `${v.weeks} wks · ≥ 1.5× avg, ≤ −1%`)}
+      ${tile("Heaviest day", b.ratio ? b.ratio.toFixed(1) + "×" : "–", `${esc((b.date || "").slice(5))} · ${fmt.pct(b.change, 1)}`)}
+    </div>
+    <p class="muted" style="margin-top:8px;font-size:12px">On the chart: blue volume bars = heavy buying days, red = heavy selling days. The grade adjusts the score (10%) and never filters a stock out.</p>`;
 }
 
 function vcpPanel(s) {

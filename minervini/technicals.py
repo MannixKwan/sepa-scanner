@@ -107,3 +107,41 @@ def trend_template(df: pd.DataFrame, rs_rating: int | None, cfg: dict) -> dict:
             "ext_sma50": float(price / s50 - 1),
         },
     }
+
+
+# ------------------------------------------------------------ volume behaviour
+GRADE_SCORE = {"A": 100, "B": 75, "C": 50, "D": 25, "E": 0}
+
+
+def volume_profile(df: pd.DataFrame, cfg: dict, exclude_last: bool = False) -> dict | None:
+    """Institutional footprint over the uptrend. Minervini wants big up days on heavy volume and
+    pullbacks on light volume; heavy-volume selling is distribution. Graded A (accumulation) to
+    E (distribution). Used to adjust the score and as a note - never as a filter."""
+    vc = cfg["volume"]
+    d = df.iloc[:-1] if exclude_last else df       # skip a partial intraday bar
+    if len(d) < 60:
+        return None
+    chg = d["close"].pct_change()
+    prior_avg = d["volume"].rolling(50).mean().shift(1)
+
+    u = d.iloc[-vc["ud_window_days"]:]
+    cu = chg.iloc[-vc["ud_window_days"]:]
+    ud = float(u["volume"][cu > 0].sum() / max(u["volume"][cu < 0].sum(), 1.0))
+
+    w = vc["heavy_window_days"]
+    vol, c, avg = d["volume"].iloc[-w:], chg.iloc[-w:], prior_avg.iloc[-w:]
+    heavy = vol >= vc["heavy_ratio"] * avg
+    up_days = heavy & (c >= vc["min_move"])
+    down_days = heavy & (c <= -vc["min_move"])
+    hu, hd = int(up_days.sum()), int(down_days.sum())
+
+    pts = 2 if ud >= 1.5 else 1 if ud >= 1.2 else 0 if ud >= 0.9 else -1 if ud >= 0.75 else -2
+    bal = hu - hd
+    pts += 2 if bal >= 3 else 1 if bal >= 1 else 0 if bal == 0 else -1 if bal >= -2 else -2
+    grade = "A" if pts >= 3 else "B" if pts >= 1 else "C" if pts == 0 else "D" if pts >= -2 else "E"
+
+    i = int(vol.to_numpy().argmax())
+    biggest = {"date": vol.index[i].strftime("%Y-%m-%d"), "change": round(float(c.iloc[i]), 4),
+               "ratio": round(float(vol.iloc[i] / avg.iloc[i]), 2) if avg.iloc[i] else None}
+    return {"grade": grade, "score": GRADE_SCORE[grade], "ud_ratio": round(ud, 2),
+            "heavy_up": hu, "heavy_down": hd, "weeks": round(w / 5), "biggest_day": biggest}

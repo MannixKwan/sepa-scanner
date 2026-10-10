@@ -43,6 +43,12 @@ DEFAULTS: dict = {
         "volume_dryup_ratio": 0.85,     # last contraction volume vs 50-day average
         "breakout_lookback_days": 5,    # recognise breakouts from the last N sessions
     },
+    "volume": {                         # accumulation grade: a score input and a note, never a filter
+        "ud_window_days": 50,           # up/down volume ratio window (IBD standard)
+        "heavy_window_days": 65,        # ~13 weeks of heavy-volume up vs down days
+        "heavy_ratio": 1.5,             # "heavy" = volume >= 1.5x the 50-day average
+        "min_move": 0.01,               # ...on a close-to-close move of at least 1%
+    },
     "trade": {
         "buy_zone_pct": 0.05,           # never chase > 5% above the pivot
         "max_stop_pct": 0.08,           # cap stop at 8% below entry

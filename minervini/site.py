@@ -78,6 +78,8 @@ def compact(r: dict) -> dict:
         "eps_accel": m.get("eps_accel_qtrs"), "fund_score": m.get("score"), "fund_pass": r.get("fund_pass"),
         "days_to_earnings": r.get("days_to_earnings"), "rs_new_high": r.get("rs_new_high"),
         "market_cap": r.get("market_cap"),
+        "acc_grade": (r.get("volume_profile") or {}).get("grade"),
+        "acc_score": (r.get("volume_profile") or {}).get("score"),
     }
 
 
