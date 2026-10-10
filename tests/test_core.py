@@ -86,6 +86,7 @@ class VcpTest(unittest.TestCase):
         self.assertEqual(r["status"], "BREAKOUT")
         p = r["plan"]
         self.assertLess(p["stop"], p["entry"])
+        self.assertFalse(p["too_wide"])
         self.assertLessEqual(p["risk_pct"], CFG["trade"]["max_stop_pct"] + 1e-9)
         self.assertGreater(r["vol_ratio"], 1.4)
 
@@ -125,6 +126,24 @@ class VcpTest(unittest.TestCase):
         self.assertLessEqual(v["final_depth"], 0.06)
         self.assertGreater(v["pivot_below_base_high"], 0.10)
         self.assertFalse(v["valid"], v)
+
+    def test_base_count_and_prior_advance(self):
+        # advance, 1st base (-20%, 5 weeks), new highs, then the current VCP = 2nd-stage base
+        px = list(np.linspace(40, 80, 200)) + leg(80, 64, 12) + leg(64, 84, 13) + list(np.linspace(84, 100, 40))
+        for a_, b_, n_ in [(100, 75, 15), (75, 97, 15), (97, 87.5, 10), (87.5, 95.5, 10), (95.5, 91.8, 6), (91.8, 94.5, 6)]:
+            px += leg(a_, b_, n_)
+        v = detect_vcp(frame(px), CFG, end_offset=1)
+        self.assertEqual(v["base_number"], 2)
+        self.assertGreater(v["prior_advance"], 0.25)
+
+    def test_base_count_resets_after_undercut(self):
+        # 1st base low ~64, 2nd correction undercuts it (to 60) -> count restarts; current base is #2
+        px = (list(np.linspace(40, 80, 200)) + leg(80, 64, 12) + leg(64, 84, 13) + leg(84, 60, 15)
+              + leg(60, 100, 40))
+        for a_, b_, n_ in [(100, 75, 15), (75, 97, 15), (97, 87.5, 10), (87.5, 95.5, 10), (95.5, 91.8, 6), (91.8, 94.5, 6)]:
+            px += leg(a_, b_, n_)
+        v = detect_vcp(frame(px), CFG, end_offset=1)
+        self.assertEqual(v["base_number"], 2)
 
     def test_new_highs_have_no_base(self):
         self.assertIsNone(detect_vcp(frame(np.linspace(40, 100, 300)), CFG))
@@ -181,6 +200,20 @@ class ExitRulesTest(unittest.TestCase):
         p = evaluate({"ticker": "X", "shares": 10, "entry_price": 100, "stop": 93, "entry_date": entry_date}, df, CFG)
         self.assertEqual(p["action"], "SELL PARTIAL")
         self.assertGreaterEqual(p["stop"], 107)  # locked in +1R after 3R
+
+
+    def test_failed_breakout_tightens(self):
+        df = self._df(leg(100, 103, 2) + leg(103, 96, 3))           # 5 sessions in, 4% under entry
+        entry_date = df.index[250].strftime("%Y-%m-%d")
+        p = evaluate({"ticker": "X", "shares": 10, "entry_price": 100, "stop": 93, "entry_date": entry_date}, df, CFG)
+        self.assertIn("failed_breakout", [s["kind"] for s in p["signals"]])
+        self.assertIn(p["action"], ("TIGHTEN", "EXIT"))   # here the 50-day break also fires (EXIT wins)
+
+    def test_time_stop_notes_dead_money(self):
+        df = self._df(list(100 + np.sin(np.arange(25)) * 1.5))      # 25 sessions going nowhere
+        entry_date = df.index[250].strftime("%Y-%m-%d")
+        p = evaluate({"ticker": "X", "shares": 10, "entry_price": 100, "stop": 93, "entry_date": entry_date}, df, CFG)
+        self.assertIn("time_stop", [s["kind"] for s in p["signals"]])
 
 
 class FundamentalsTest(unittest.TestCase):

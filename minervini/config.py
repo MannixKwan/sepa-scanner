@@ -32,12 +32,15 @@ DEFAULTS: dict = {
         "min_contractions": 2,
         "max_contractions": 6,
         "max_base_depth": 0.40,         # first (deepest) contraction
-        "max_final_depth": 0.12,        # last contraction must be tight
+        "max_final_depth": 0.10,        # last contraction must be tight (Minervini: usually < 10%)
         "min_contraction_depth": 0.02,  # ignore wiggles smaller than this
         "min_base_days": 15,            # ~3 weeks
         "min_final_contraction_bars": 3,  # the last pullback started >= 3 sessions ago...
         "min_final_pullback_bars": 2,     # ...and took >= 2 sessions to reach its low (no one-day dips)
         "max_pivot_below_base_high": 0.10,  # pivot must be near the top of the base
+        "min_prior_advance": 0.25,      # a base should follow an advance of >= 25-30%
+        "base_min_depth": 0.12,         # a correction this deep (and >= 3 weeks) counts as a base
+        "late_stage_base": 3,           # 3rd-stage bases and later are late and failure-prone
         "max_base_days": 260,           # ~1 year
         "ready_within": 0.05,           # "READY" when within 5% below pivot
         "volume_dryup_ratio": 0.85,     # last contraction volume vs 50-day average
@@ -87,6 +90,10 @@ DEFAULTS: dict = {
         "climax_days": 15,
         "near_stop_pct": 0.03,
         "earnings_warning_days": 7,
+        "failed_breakout_pct": 0.03,    # closes > 3% below entry soon after buying = breakout failing
+        "failed_breakout_days": 10,
+        "time_stop_days": 20,           # no progress after ~4 weeks = dead money
+        "time_stop_min_gain": 0.03,
     },
     "ibkr": {
         "host": "127.0.0.1",

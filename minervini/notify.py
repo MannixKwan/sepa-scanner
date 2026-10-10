@@ -92,6 +92,8 @@ def _pick_lines(f: Fmt, r: dict, k: int) -> list[str]:
         facts.append(f"VCP {r['setup']['count']}T")
     if r.get("volume_profile"):
         facts.append(f"Vol {r['volume_profile']['grade']}")
+    if (r.get("setup") or {}).get("base_number"):
+        facts.append(f"base #{r['setup']['base_number']}")
     if r.get("days_to_earnings") is not None and 0 <= r["days_to_earnings"] <= 14:
         facts.append(f"⚠️ earnings {r['days_to_earnings']}d")
     lines.append("    " + " · ".join(facts))

@@ -19,13 +19,16 @@ vcp:
   min_contractions: 2
   max_contractions: 6
   max_base_depth: 0.40         # deepest (first) correction allowed
-  max_final_depth: 0.12        # last contraction must be this tight
+  max_final_depth: 0.10        # last contraction must be this tight (Minervini: usually < 10%, often 3-6%)
   ready_within: 0.05           # READY = within 5% below the pivot
   volume_dryup_ratio: 0.85
+  max_pivot_below_base_high: 0.10   # pivot must form near the top of the base
+  min_prior_advance: 0.25      # a base should follow an advance of >= 25-30%
+  late_stage_base: 3           # 3rd-stage bases and later are flagged as late-stage
 
 trade:
   buy_zone_pct: 0.05           # buy only up to 5% above the pivot
-  max_stop_pct: 0.08           # never risk more than 8% on the initial stop
+  max_stop_pct: 0.08           # setups needing a wider stop aren't low-risk: shown, but not in Stocks to watch
   breakout_volume_ratio: 1.4   # want breakout volume >= 140% of average
 
 risk:                          # position sizing & progressive exposure (Minervini's rules, your numbers)
@@ -56,6 +59,8 @@ positions:
   partial_profit_at_r: 3.0
   partial_profit_at_pct: 0.20
   earnings_warning_days: 7
+  failed_breakout_pct: 0.03    # > 3% back below entry within 10 sessions = breakout failing
+  time_stop_days: 20           # little progress after ~4 weeks = consider freeing the capital
 
 ibkr:
   host: 127.0.0.1

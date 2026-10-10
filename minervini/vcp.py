@@ -24,6 +24,31 @@ def _d(ts) -> str:
     return pd.Timestamp(ts).strftime("%Y-%m-%d")
 
 
+def count_bases(hi: np.ndarray, lo: np.ndarray, p0: int, cfg: dict) -> int:
+    """Approximate base count (1 = first base of the advance). From the lowest low of the prior
+    ~2 years, every correction >= base_min_depth lasting >= 3 weeks that resolves into a new high
+    is a completed base; the current base is the next one. Like IBD/Minervini, the count resets
+    when a correction undercuts the low of the previous base."""
+    vc = cfg["vcp"]
+    start = max(0, p0 - 504)
+    s = start + int(np.argmin(lo[start:p0 + 1]))
+    run_hi, run_i, run_lo, done, prev_base_low = hi[s], s, lo[s], 0, None
+    for i in range(s + 1, p0 + 1):
+        if hi[i] > run_hi:
+            if (run_hi - run_lo) / run_hi >= vc["base_min_depth"] and i - run_i >= vc["min_base_days"]:
+                if prev_base_low is not None and run_lo < prev_base_low:
+                    done = 0              # undercut the prior base: the count starts over
+                done += 1
+                prev_base_low = run_lo
+            run_hi, run_i, run_lo = hi[i], i, lo[i]
+        else:
+            run_lo = min(run_lo, lo[i])
+    # the current base itself undercutting the previous base's low also resets the count
+    if prev_base_low is not None and lo[p0:].min() < prev_base_low:
+        done = 0
+    return done + 1
+
+
 def detect_vcp(df: pd.DataFrame, cfg: dict, end_offset: int = 1) -> dict | None:
     vc = cfg["vcp"]
     n = len(df) - end_offset
@@ -70,6 +95,9 @@ def detect_vcp(df: pd.DataFrame, cfg: dict, end_offset: int = 1) -> dict | None:
     pivot = float(hi[piv_i])
     stop_ref = float(lo[last_t])
     pivot_below_high = 1 - pivot / hi[p0]   # a real VCP tightens up near the top of its base
+    pre = lo[max(0, p0 - 126):p0 + 1]
+    prior_advance = float(hi[p0] / pre.min() - 1) if len(pre) and pre.min() > 0 else 0.0
+    base_no = count_bases(hi, lo, p0, cfg)
 
     vol50 = float(np.mean(vol[max(0, n - 50):n])) or 1.0
     last_leg = vol[piv_i:n]
@@ -98,6 +126,8 @@ def detect_vcp(df: pd.DataFrame, cfg: dict, end_offset: int = 1) -> dict | None:
     q += 15 if depths[0] <= 0.25 else 8 if depths[0] <= 0.35 else 0
     q += 10 if ratios and np.mean(ratios) <= 0.7 else (5 if ratios else 0)
     q += 10 if updown >= 1.2 else 5 if updown >= 1.0 else 0
+    q += 10 if tight <= 0.04 else 5 if tight <= 0.07 else 0      # tight closes into the pivot
+    q -= 10 if prior_advance < vc["min_prior_advance"] else 0
 
     notes = []
     if depths[0] > vc["max_base_depth"]:
@@ -114,6 +144,10 @@ def detect_vcp(df: pd.DataFrame, cfg: dict, end_offset: int = 1) -> dict | None:
         notes.append("Very low volume day in last 10 sessions")
     if updown >= 1.2:
         notes.append(f"Accumulation in base (up/down volume {updown:.1f})")
+    if tight <= 0.04:
+        notes.append(f"Tight action: last 5 sessions within {tight:.1%}")
+    if prior_advance < vc["min_prior_advance"]:
+        notes.append(f"Only {prior_advance:.0%} advance before the base (want ≥ {vc['min_prior_advance']:.0%})")
 
     return {
         "valid": bool(valid),
@@ -137,7 +171,9 @@ def detect_vcp(df: pd.DataFrame, cfg: dict, end_offset: int = 1) -> dict | None:
         "vol_dryup": round(dryup, 2),
         "tightness_5d": round(tight, 4),
         "updown_volume": round(updown, 2),
-        "quality": int(min(q, 100)),
+        "quality": int(max(0, min(q, 100))),
+        "prior_advance": round(prior_advance, 4),
+        "base_number": base_no,
         "end_offset": end_offset,
         "notes": notes,
     }

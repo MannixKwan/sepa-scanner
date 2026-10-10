@@ -77,9 +77,24 @@ def _yahoo(ticker: str, want_statements: bool = False) -> dict:
             if d0.date() >= date.today():
                 next_earn = d0
 
+    # analyst estimate trend & revisions (Minervini: upward revisions are a catalyst)
+    estimates: dict[str, dict] = {}
+    et = _retry(lambda: tk.eps_trend)
+    if et is not None and len(et):
+        for per, row in et.iterrows():
+            def val(col):
+                v = row.get(col)
+                return None if v is None or pd.isna(v) else float(v)
+            estimates[str(per)] = {"current": val("current"), "d30": val("30daysAgo"), "d90": val("90daysAgo")}
+    er = _retry(lambda: tk.eps_revisions)
+    if er is not None and len(er):
+        for per, row in er.iterrows():
+            e = estimates.setdefault(str(per), {})
+            e["up30"] = int(row.get("upLast30days") or 0) if not pd.isna(row.get("upLast30days")) else 0
+            e["down30"] = int(row.get("downLast30days") or 0) if not pd.isna(row.get("downLast30days")) else 0
     return {"profile": profile, "eps": eps_rows,
             "next_earnings": next_earn.date().isoformat() if next_earn is not None else None,
-            "statements": None}
+            "statements": None, "estimates": estimates}
 
 
 def _yahoo_statements(ticker: str) -> dict | None:
@@ -208,6 +223,16 @@ def build_metrics(raw: dict, cfg: dict) -> dict:
         m["eps_ttm_yoy"] = a / b - 1 if b > 0 else None
     m["code33"] = m["eps_accel_qtrs"] >= 3 and m["sales_accel_qtrs"] >= 3 and margin_up >= 3
 
+    est = raw.get("estimates") or {}
+
+    def revision(e: dict) -> float | None:
+        c, prev = e.get("current"), e.get("d30")
+        return (c - prev) / abs(prev) if c is not None and prev not in (None, 0) else None
+    cy = est.get("0y", {})
+    m["est_rev_cy"] = revision(cy)                    # this fiscal year, change in 30 days
+    m["est_rev_ny"] = revision(est.get("+1y", {}))    # next fiscal year
+    m["est_up_30d"], m["est_down_30d"] = cy.get("up30", 0), cy.get("down30", 0)
+
     # Score 0-100 (earnings carry the most weight in SEPA).
     s = 0
     g = m["eps_q_yoy"]
@@ -224,7 +249,9 @@ def build_metrics(raw: dict, cfg: dict) -> dict:
     s += 5 if (m["surprise_last"] or 0) > 0 else 0
     s += 5 if m["positive_surprises_4q"] >= 3 else 0
     s += 5 if (m["eps_ttm_yoy"] or 0) >= 0.25 else 0
-    m["score"] = int(min(s, 100))
+    s += 5 if (m["est_rev_cy"] or 0) >= 0.02 else 0
+    s -= 5 if (m["est_rev_cy"] or 0) <= -0.02 else 0
+    m["score"] = int(max(0, min(s, 100)))
 
     eps_ok = (g is not None and g >= fc["min_eps_growth"]) or (m["eps_q_turnaround"] and (m["eps_last"] or 0) > 0)
     sales_ok = (sg_ is not None and sg_ >= fc["min_sales_growth"]) or m["sales_accel_qtrs"] >= 2
@@ -239,6 +266,8 @@ def build_metrics(raw: dict, cfg: dict) -> dict:
         flags.append("Not yet profitable")
     if m["surprise_last"] is not None and m["surprise_last"] < 0:
         flags.append("Missed estimates last quarter")
+    if (m["est_rev_cy"] or 0) <= -0.02:
+        flags.append(f"Analysts cut this year's EPS estimate {m['est_rev_cy']:+.0%} in 30 days")
     m["flags"] = flags
 
     return {
@@ -261,6 +290,8 @@ def _fresh(path, cfg) -> dict | None:
         raw = json.loads(path.read_text())
     except Exception:
         return None
+    if "estimates" not in raw:
+        return None  # cached before estimate revisions were tracked: refetch once
     fetched = datetime.fromisoformat(raw["fetched_at"])
     if datetime.now() - fetched > timedelta(days=cfg["fundamentals"]["cache_days"]):
         return None

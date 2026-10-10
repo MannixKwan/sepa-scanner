@@ -40,10 +40,10 @@ def trade_plan(setup: dict, price: float, cfg: dict, equity: float) -> dict:
     tr, rk = cfg["trade"], cfg["risk"]
     entry = setup["pivot"]
     stop = round(setup["stop_ref"] * 0.995, 2)          # just under the low of the last contraction
-    floor = round(entry * (1 - tr["max_stop_pct"]), 2)
-    capped = stop < floor
-    stop = max(stop, floor)
     risk = max(entry - stop, 0.01)
+    # Minervini: the stop goes where the setup is wrong. If that's more than ~8% away the trade
+    # isn't low-risk - skip it and wait for a tighter contraction rather than squeeze the stop.
+    too_wide = risk / entry > tr["max_stop_pct"]
     shares = math.floor(equity * rk["risk_per_trade_pct"] / risk)
     shares = max(0, min(shares, math.floor(equity * rk["max_position_pct"] / entry)))
     basis = max(price, entry)
@@ -51,7 +51,7 @@ def trade_plan(setup: dict, price: float, cfg: dict, equity: float) -> dict:
         "entry": round(entry, 2),
         "buy_zone_hi": round(entry * (1 + tr["buy_zone_pct"]), 2),
         "stop": stop,
-        "stop_capped": capped,
+        "too_wide": bool(too_wide),
         "risk_pct": round(risk / entry, 4),
         "risk_pct_now": round((basis - stop) / basis, 4),
         "shares": shares,
@@ -123,6 +123,12 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
     score += 3 if rs_new_high else 0
     score += 5 if m.get("code33") else 0
     score -= 8 if sma50_falling else 0
+    base_no = setup.get("base_number") if setup and setup["valid"] else None
+    late = vc["late_stage_base"]
+    if base_no and base_no >= late:
+        score -= min(10, 5 * (base_no - late + 1))
+    if plan and plan["too_wide"]:
+        score -= 10
     score = int(round(max(0, min(score, 100))))
 
     # ------------------------------------------------------- why / red flags
@@ -136,6 +142,8 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
     if setup and setup["valid"]:
         dep = " → ".join(f"{d:.0%}" for d in setup["depths"])
         reasons.append(f"{setup['count']}-contraction VCP over {setup['base_weeks']:g} weeks: {dep}")
+        if base_no and base_no < late:
+            reasons.append(f"{_ordinal(base_no)}-stage base - early in the advance, where the odds are best")
         if setup["vol_dryup"] <= vc["volume_dryup_ratio"]:
             reasons.append(f"Volume dried up to {setup['vol_dryup']:.0%} of average in the last contraction")
     if vp and vp["grade"] in ("A", "B"):
@@ -153,6 +161,9 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
         reasons.append(f"Net margin expanding YoY for {m['margin_expanding_qtrs']} quarters")
     if m.get("code33"):
         reasons.append("Code 33: EPS, sales and margins all accelerating 3 quarters")
+    if (m.get("est_rev_cy") or 0) >= 0.02:
+        reasons.append(f"Analysts raised this year's EPS estimate {m['est_rev_cy']:+.0%} in 30 days "
+                       f"({m.get('est_up_30d', 0)} up / {m.get('est_down_30d', 0)} down)")
     ind = (fund or {}).get("profile", {}).get("industry")
     if industry_rank and ind and industry_rank.get(ind, 0) >= 3:
         reasons.append(f"Industry group in leadership: {industry_rank[ind]} {ind} stocks pass the Trend Template")
@@ -172,8 +183,13 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
         flags.append("Extended beyond the buy zone - don't chase")
     if status in ("BREAKOUT", "BUY ZONE") and setup and setup.get("breakout_days_ago") == 0 and vol_ratio < tr["breakout_volume_ratio"]:
         flags.append(f"Breakout volume light so far ({vol_ratio:.1f}× average pace; want ≥ {tr['breakout_volume_ratio']:.1f}×)")
-    if plan and plan["stop_capped"]:
-        flags.append(f"Last contraction is wide - stop capped at {tr['max_stop_pct']:.0%} below entry")
+    if plan and plan["too_wide"]:
+        flags.append(f"Stop would be {plan['risk_pct']:.1%} below the pivot - over the {tr['max_stop_pct']:.0%} maximum; "
+                     "not a low-risk entry until it tightens (left out of Stocks to watch)")
+    if base_no and base_no >= late:
+        flags.append(f"{_ordinal(base_no)}-stage base - late in the advance; late-stage bases fail more often")
+    if setup and setup["valid"] and setup.get("prior_advance", 1) < vc["min_prior_advance"]:
+        flags.append(f"Only {setup['prior_advance']:.0%} advance before the base (want ≥ {vc['min_prior_advance']:.0%})")
     if fund and not m.get("pass"):
         flags.append("Fundamentals below SEPA thresholds")
     flags += m.get("flags", [])
@@ -213,11 +229,17 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
     }
 
 
+def _ordinal(n: int) -> str:
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
 def top_picks(rows: list[dict], cfg: dict, n: int) -> list[dict]:
-    """The handful worth acting on: actionable status, strong fundamentals, no earnings landmine."""
+    """The handful worth acting on: actionable status, a stop within the maximum, strong
+    fundamentals, no earnings landmine."""
     need_fund = cfg["fundamentals"]["require_for_top_picks"]
     pool = [r for r in rows
             if r["status"] in ("BREAKOUT", "BUY ZONE", "READY")
+            and not (r.get("plan") or {}).get("too_wide")
             and (not need_fund or r.get("fund_pass"))
             and not (r.get("days_to_earnings") is not None and 0 <= r["days_to_earnings"] <= 3)]
     pool.sort(key=lambda r: (STATUS_ORDER[r["status"]] > 1, -r["score"]))

@@ -70,17 +70,23 @@ signal), so the 15-minute job fetches only those and finishes in seconds.
   "Confirmed uptrend". In a correction, picks are flagged and the guidance is to protect capital.
 * **Trend Template (8/8):** price > 150 & 200-day MA; 150 > 200; 200-day rising ≥ 1 month;
   50 > 150 & 200; price > 50-day; ≥ 30% above the 52-week low; within 25% of the 52-week high; RS ≥ 70.
-* **VCP:** 2–6 contractions, first ≤ 40%, last ≤ 12%, base ≥ 3 weeks, volume drying up.
+* **VCP:** 2–6 contractions, first ≤ 40%, last ≤ 10% (and not a one-day dip), base ≥ 3 weeks after an
+  advance of ≥ 25%, pivot within 10% of the base high, volume drying up. The **base stage** is counted
+  (resetting when a correction undercuts the prior base); 3rd-stage bases and later are flagged as late.
 * **Volume behaviour (graded A–E, never a filter):** up/down volume ratio over 50 days and heavy-volume
   (≥ 1.5× average, ≥ 1% move) up days vs down days over 13 weeks. Accumulation lifts the score;
   distribution lowers it and adds a warning.
 * **Fundamentals:** latest-quarter EPS ≥ +25% YoY (or loss → profit) and sales ≥ +20% or accelerating.
-  Bonus for acceleration, margin expansion, beats, and Code 33.
+  Bonus for acceleration, margin expansion, beats, Code 33 and analysts raising estimates
+  (cuts lower the score).
 * **Entry:** buy-stop at the pivot, ideally on volume ≥ 140% of average, never > 5% above the pivot.
   Avoid buying right before earnings.
-* **Stop:** just under the last contraction's low, capped at 8%. **Size:** risk 1.25% of equity,
-  max 25% of equity in one stock.
-* **Exit:** see `positions.py`; every threshold is in `config.yaml`.
+* **Stop:** just under the last contraction's low. If that's more than 8% below the pivot the setup
+  isn't low-risk: it stays on the watchlist with a warning but is left out of Stocks to watch and alerts.
+  **Size:** risk 1.25% of equity, max 25% of equity in one stock.
+* **Exit:** see `positions.py`. Besides the stop, breakeven and 50-day rules: a position more than 3%
+  below entry within 10 sessions is a failing breakout (tighten), and one going nowhere for 20 sessions
+  is flagged as dead money. Every threshold is in `config.yaml`.
 
 ## Allocation (how much to buy)
 

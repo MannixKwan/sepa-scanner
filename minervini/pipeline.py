@@ -283,6 +283,8 @@ def _events(prev: dict[str, dict], rows: list[dict], positions: list[dict], mark
         t, p = r["ticker"], r.get("plan") or {}
         if need_fund and not r.get("fund_pass"):
             continue
+        if p.get("too_wide") and r["status"] != "FAILED":
+            continue   # not a low-risk entry - don't alert on it
         if r["status"] == "BREAKOUT":
             add(f"{t}:breakout", "🚀", t,
                 f"breaking out: {r['price']:,.2f} vs pivot {p['entry']:,.2f} ({r['pivot_dist']:+.1%}) · "

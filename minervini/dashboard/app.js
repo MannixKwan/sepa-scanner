@@ -43,6 +43,7 @@ const GRADE_HELP = {
   D: "Distribution: selling volume outweighs buying.",
   E: "Heavy distribution: repeated big-volume selling days.",
 };
+const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
 const gradeOf = (r) => r.volume_profile?.grade ?? r.acc_grade;
 const gradeChip = (g) => (g ? chip(GRADE_KIND[g] || "", g, GRADE_HELP[g] || "") : "–");
 const chip = (kind, text, title = "") => `<span class="chip ${kind}" title="${esc(title)}"><span class="dot"></span>${esc(text)}</span>`;
@@ -140,7 +141,7 @@ function pickCard(r) {
       <div><div class="tk">${esc(r.ticker)}</div><div class="nm" title="${esc(r.name)}">${esc(r.name)}</div></div>
       <div class="px"><b class="num">${fmt.px(r.price)}</b><div class="num ${dir(r.change_pct)}">${fmt.pct(r.change_pct)}</div></div>
     </div>
-    <div class="facts">${statusChip(r.status)}<span class="tag">${pivotText(r)}</span><span class="tag">Score ${r.score}</span>${gradeOf(r) ? `<span class="tag" title="${esc(GRADE_HELP[gradeOf(r)])}">Volume ${gradeOf(r)}</span>` : ""}</div>
+    <div class="facts">${statusChip(r.status)}<span class="tag">${pivotText(r)}</span><span class="tag">Score ${r.score}</span>${gradeOf(r) ? `<span class="tag" title="${esc(GRADE_HELP[gradeOf(r)])}">Volume ${gradeOf(r)}</span>` : ""}${s.base_number ? `<span class="tag" title="Base count in this advance - 1st and 2nd stage bases have the best odds">${ordinal(s.base_number)}-stage base</span>` : ""}</div>
     ${meter(p.stop, p.entry, p.buy_zone_hi, r.price)}
     <div class="kv num">
       <div><div class="k">Buy above</div><div class="v">${fmt.px(p.entry)}</div></div>
@@ -475,9 +476,9 @@ function viewRules() {
     <tr><td class="l">Universe</td><td class="l wrap">All NASDAQ common stocks - no ETFs, warrants, SPACs or preferred shares</td><td>${fmt.int(c.universe)}</td></tr>
     <tr><td class="l">Liquidity</td><td class="l wrap">Price ≥ $${u.min_price}, ≥ ${fmt.int(u.min_avg_volume)} shares and ≥ ${fmt.usd(u.min_avg_dollar_volume)} traded a day</td><td>${fmt.int(c.liquid)}</td></tr>
     <tr><td class="l">Trend Template</td><td class="l wrap">All 8 checks: price above the 50/150/200-day averages; 150 above 200; 200-day rising ≥ 1 month; 50 above 150 and 200; ≥ ${P(tt.min_above_52w_low)} above the 52-week low; within ${P(tt.max_below_52w_high)} of the 52-week high; RS rating ≥ ${tt.min_rs_rating}</td><td>${fmt.int(c.tt_pass)}</td></tr>
-    <tr><td class="l">VCP base</td><td class="l wrap">${vc.min_contractions}–${vc.max_contractions} pullbacks, each shallower than the last; first ≤ ${P(vc.max_base_depth)}, last ≤ ${P(vc.max_final_depth)}, at least ${vc.min_final_contraction_bars} sessions old and not a one-day dip; base ≥ ${Math.round(vc.min_base_days / 5)} weeks; pivot within ${P(vc.max_pivot_below_base_high)} of the base high</td><td>${fmt.int(c.vcp)}</td></tr>
+    <tr><td class="l">VCP base</td><td class="l wrap">${vc.min_contractions}–${vc.max_contractions} pullbacks, each shallower than the last; first ≤ ${P(vc.max_base_depth)}, last ≤ ${P(vc.max_final_depth)}, at least ${vc.min_final_contraction_bars} sessions old and not a one-day dip; base ≥ ${Math.round(vc.min_base_days / 5)} weeks after an advance of ≥ ${P(vc.min_prior_advance)}; pivot within ${P(vc.max_pivot_below_base_high)} of the base high. Base stage is counted - ${ordinal(vc.late_stage_base || 3)}-stage bases and later are flagged as late</td><td>${fmt.int(c.vcp)}</td></tr>
     <tr><td class="l">Volume behaviour</td><td class="l wrap">Graded A–E from the up/down volume ratio (${R.volume?.ud_window_days ?? 50} days) and heavy-volume up vs down days (${Math.round((R.volume?.heavy_window_days ?? 65) / 5)} weeks). Adjusts the score - not a filter</td><td>A–E</td></tr>
-    <tr><td class="l">Fundamentals</td><td class="l wrap">Latest quarter EPS ≥ +${P(fd.min_eps_growth)} vs a year ago (or loss → profit), and sales ≥ +${P(fd.min_sales_growth)} or accelerating</td><td>pass / below</td></tr>
+    <tr><td class="l">Fundamentals</td><td class="l wrap">Latest quarter EPS ≥ +${P(fd.min_eps_growth)} vs a year ago (or loss → profit), and sales ≥ +${P(fd.min_sales_growth)} or accelerating. Bonus for acceleration, margin expansion, beats and analysts raising estimates</td><td>pass / below</td></tr>
   </tbody></table></div>
   <p>The <b>RS rating</b> (1–99) ranks the stock's 12-month performance against every NASDAQ stock, with the latest quarter counted double. Each stock's <b>score</b> blends RS (20%), base quality (25% - a tight last pullback, drying-up volume, a shallow base), fundamentals (30%), volume behaviour (10%) and closeness to the buy point (15%), minus a penalty if the 50-day average is falling.
   <b>Watchlist</b> = the top ${st.watchlist_size} stocks with a base. <b>Stocks to watch</b> (the ${st.top_n} in your messages) = Breakout, Buy zone or Ready, fundamentals pass, and no earnings in the next 3 days.</p>
@@ -504,6 +505,7 @@ function viewRules() {
     <li>The buy point is the <b>pivot line</b> - computed for you. Before the open, a SEPA trader places a <b>buy-stop</b> a few cents above it.</li>
     <li>Only count the breakout on volume ≥ <b>${tr.breakout_volume_ratio}×</b> the 50-day average (the app flags light-volume breakouts).</li>
     <li>Never pay more than <b>Max buy</b> (pivot + ${P(tr.buy_zone_pct)}); above that it's Extended - wait for the next base.</li>
+    <li>The stop goes just under the last contraction's low. If that's more than ${P(tr.max_stop_pct)} below the pivot, it isn't a low-risk entry: the stock stays on the watchlist with a warning but is left out of Stocks to watch until it tightens.</li>
     <li>Avoid opening a position in the days before an earnings report, and don't buy when the market is in correction.</li>
   </ol>
 
@@ -530,6 +532,8 @@ function viewRules() {
     <tr><td class="l">Close below the 21-day EMA</td><td class="l">${chip("serious", "TIGHTEN")} tighten the stop or trim</td></tr>
     <tr><td class="l">Close below the 50-day MA</td><td class="l">${chip("critical", "EXIT")} sell the rest</td></tr>
     <tr><td class="l">Earnings within ${ps.earnings_warning_days} days</td><td class="l">Less than 1R of profit: consider reducing. More: OK to hold</td></tr>
+    <tr><td class="l">More than ${P(ps.failed_breakout_pct)} below entry within ${ps.failed_breakout_days} sessions</td><td class="l">${chip("serious", "TIGHTEN")} breakout failing - the best ones don't come back</td></tr>
+    <tr><td class="l">${ps.time_stop_days} sessions with under +${P(ps.time_stop_min_gain)}</td><td class="l">Dead money - consider freeing the capital (note only)</td></tr>
   </tbody></table></div>
   ${exitRows}
   <p class="muted">The app only manages trades it knows about: IBKR positions once connected, or what you list in <code>positions.yaml</code> - include the plan's stop, otherwise it assumes ${P(ps.default_stop_pct)} below your entry.</p>
@@ -597,6 +601,7 @@ function planPanel(r) {
       <dt>Buy-stop at pivot</dt><dd class="big">${fmt.px(p.entry)}</dd>
       <dt>Buy zone</dt><dd>${fmt.px(p.entry)} – ${fmt.px(p.buy_zone_hi)}</dd>
       <dt>Initial stop</dt><dd class="down">${fmt.px(p.stop)} (−${fmt.pct(p.risk_pct, 1, false)})</dd>
+      ${p.too_wide ? `<dt></dt><dd class="muted" style="font-weight:400">⚠️ over the ${fmt.pct(st.max_stop_pct, 0, false)} maximum - not a low-risk entry yet</dd>` : ""}
       ${r.price > p.entry ? `<dt>Risk if bought now</dt><dd>−${fmt.pct(p.risk_pct_now, 1, false)}</dd>` : ""}
       <dt>Position size</dt><dd>${p.shares ? `${fmt.int(p.shares)} sh ≈ ${fmt.usd(p.position_value)}` : "0 sh"}</dd>
       ${p.sizing ? `<dt></dt><dd class="muted" style="font-weight:400">${p.shares ? fmt.pct(p.sizing.pct_capital, 1, false) + " of capital · " : ""}limited by ${esc(p.sizing.limit)}</dd>` : ""}
@@ -645,6 +650,8 @@ function vcpPanel(s) {
       ${tile("Base", s.base_weeks + " wks", "depth " + fmt.pct(s.base_depth, 0, false))}
       ${tile("Volume dry-up", fmt.pct(s.vol_dryup, 0, false), "of 50-day avg")}
       ${tile("Quality", s.quality + "/100", "up/down vol " + s.updown_volume)}
+      ${s.base_number ? tile("Base stage", ordinal(s.base_number), s.base_number >= ((S.settings?.rules?.vcp?.late_stage_base) || 3) ? "late stage - higher failure rate" : "early stage - best odds") : ""}
+      ${s.prior_advance != null ? tile("Prior advance", fmt.pct(s.prior_advance, 0), "into the base · want ≥ 25%") : ""}
     </div>
     <div class="tablewrap"><table><thead><tr><th class="l">#</th><th>Started</th><th>High</th><th>Low</th><th>Depth</th></tr></thead><tbody>${rows}</tbody></table></div>
     ${s.notes?.length ? `<ul class="list" style="margin-top:8px">${s.notes.map((n) => `<li>${ICON.dot}<span class="ink2">${esc(n)}</span></li>`).join("")}</ul>` : ""}`;
@@ -720,6 +727,7 @@ function fundPanel(f, r) {
       ${tile("EPS, trailing 4Q", fmt.pct(m.eps_ttm_yoy, 0), "vs prior 4 quarters")}
       ${tile("Net margin", fmt.pct(m.margin_last, 1, false), m.margin_expanding_qtrs ? `up YoY ${m.margin_expanding_qtrs} qtrs` : "not expanding")}
       ${tile("Beat estimates", `${m.positive_surprises_4q ?? 0}/4`, m.surprise_last != null ? `last ${m.surprise_last.toFixed(1)}%` : "")}
+      ${m.est_rev_cy != null ? tile("Estimate revisions", fmt.pct(m.est_rev_cy, 1), `this year, 30 days · ${m.est_up_30d ?? 0} up / ${m.est_down_30d ?? 0} down`) : ""}
       ${tile("Next earnings", f.next_earnings ? f.next_earnings.slice(5) : "–", r.days_to_earnings != null ? `in ${r.days_to_earnings} days` : "")}
     </div>
     <h3>Quarterly EPS <span class="muted" style="font-weight:400">· growth vs same quarter last year (bold = accelerating)</span></h3>

@@ -9,6 +9,8 @@ Rules applied (all thresholds in config.yaml -> positions):
     and on a climax run (+climax_gain_pct within climax_days sessions).
   * Sell into weakness: close below the 50-day MA = sell the rest; below the 21-day EMA = tighten.
   * Earnings within earnings_warning_days: hold only with a profit cushion.
+  * Failed breakout: back > failed_breakout_pct below entry within failed_breakout_days = tighten.
+  * Time stop: little progress after time_stop_days = consider redeploying the capital.
 """
 from __future__ import annotations
 
@@ -117,6 +119,15 @@ def evaluate(pos: dict, df: pd.DataFrame, cfg: dict, next_earnings: str | None =
         if len(chg) >= 2 and chg.iloc[-1] == chg.min() and chg.iloc[-1] < -0.03 and last["volume"] > df["vol50"].iloc[-2]:
             signals.append(("TIGHTEN", "big_down_day", f"Largest one-day drop since entry ({chg.iloc[-1]:.1%}) on heavy volume"))
 
+    days = len(since)
+    if days <= pc["failed_breakout_days"] and price > stop and price < entry * (1 - pc["failed_breakout_pct"]):
+        signals.append(("TIGHTEN", "failed_breakout",
+                        f"Back {1 - price / entry:.1%} below your entry after {days} sessions - the breakout is "
+                        "failing; the best ones don't come back. Consider cutting before the stop"))
+    if days >= pc["time_stop_days"] and gain < pc["time_stop_min_gain"] and max_gain_r < 1:
+        signals.append(("HOLD", "time_stop",
+                        f"{days} sessions and only {gain:+.1%} - dead money; consider freeing the capital for a better setup"))
+
     if price > stop and (price - stop) / price <= pc["near_stop_pct"]:
         signals.append(("TIGHTEN", "near_stop", f"Only {(price - stop) / price:.1%} above the stop {stop:,.2f}"))
 
@@ -139,6 +150,7 @@ def evaluate(pos: dict, df: pd.DataFrame, cfg: dict, next_earnings: str | None =
         "gain_pct": round(gain, 4),
         "pnl": round((price - entry) * shares, 2),
         "r_multiple": round(cur_r, 2),
+        "days_held": days,
         "max_gain_r": round(max_gain_r, 2),
         "initial_stop": round(initial_stop, 2),
         "stop": stop,
