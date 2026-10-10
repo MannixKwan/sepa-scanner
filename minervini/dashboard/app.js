@@ -384,38 +384,150 @@ function viewAll() {
   app.querySelectorAll("[data-f]").forEach((b) => b.addEventListener("click", () => { allFilter.f = b.dataset.f; viewAll(); }));
 }
 
+/* ET wall-clock "HH:MM" today -> the same instant in the viewer's configured timezone */
+function etToLocal(hhmm, tz) {
+  const [h, m] = hhmm.split(":").map(Number);
+  const now = new Date();
+  const ny = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const at = new Date(ny);
+  at.setHours(h, m, 0, 0);
+  const inst = new Date(at.getTime() + (now - ny));
+  try {
+    return inst.toLocaleTimeString("en-US", { timeZone: tz || undefined, hour: "2-digit", minute: "2-digit", hour12: false });
+  } catch { return hhmm + " ET"; }
+}
+function addMinutes(hhmm, mins) {
+  const [h, m] = hhmm.split(":").map(Number);
+  const t = h * 60 + m + mins;
+  return `${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+}
+
+/* Textbook VCP, labelled - the pattern every chart is compared against */
+function vcpDiagram() {
+  const P = [[10, 178], [40, 125], [70, 48], [125, 165], [190, 60], [240, 118], [295, 70], [335, 92], [370, 74],
+    [395, 77], [418, 73], [445, 54], [470, 47], [505, 34], [540, 26]];
+  const path = P.map(([x, y], i) => `${i ? "L" : "M"}${x},${y}`).join(" ");
+  const vols = [30, 34, 40, 46, 52, 44, 40, 36, 30, 34, 28, 24, 26, 22, 18, 20, 16, 14, 12, 10, 11, 9, 8, 7, 8, 7, 46, 38, 30, 26, 24, 22];
+  const bw = 11, gap = 6, x0 = 10;
+  const bars = vols.map((h, i) => {
+    const x = x0 + i * (bw + gap), heavy = i === 26;
+    return `<rect x="${x}" y="${290 - h}" width="${bw}" height="${h}" rx="2" class="${heavy ? "vb hv" : "vb"}"/>`;
+  }).join("");
+  return `<svg class="diagram" viewBox="0 0 680 300" role="img" aria-label="Diagram of a volatility contraction pattern with pivot, buy zone and stop">
+    <rect class="zone" x="430" y="60" width="130" height="10"/>
+    <line class="piv" x1="280" x2="560" y1="70" y2="70"/>
+    <line class="stp" x1="320" x2="560" y1="96" y2="96"/>
+    <path class="px" d="${path}"/>
+    <circle class="dot" cx="70" cy="48" r="4"/><text x="70" y="36" text-anchor="middle">Base high</text>
+    <text x="125" y="183" text-anchor="middle">C1 −25%</text>
+    <text x="240" y="136" text-anchor="middle">C2 −12%</text>
+    <text x="335" y="110" text-anchor="middle">C3 −5%</text>
+    <line class="lead" x1="418" y1="36" x2="422" y2="64"/><circle class="dot" cx="422" cy="70" r="4"/><text x="414" y="32" text-anchor="end" class="em">Breakout above pivot</text>
+    <text x="566" y="62" class="lab">Max buy (+5%)</text>
+    <text x="566" y="74" class="lab em">Pivot</text>
+    <text x="566" y="100" class="lab crit">Stop</text>
+    <line class="base" x1="0" x2="560" y1="290" y2="290"/>
+    ${bars}
+    <text x="300" y="248" text-anchor="middle">volume dries up</text>
+    <text x="452" y="236" class="em">volume ≥ 1.4× avg</text>
+  </svg>`;
+}
+
 function viewRules() {
-  const st = S.settings || {}, pr = st.positions_rules || {};
-  app.innerHTML = `<div class="prose">
+  const st = S.settings || {}, R = st.rules || {}, c = S.counts || {}, pf = S.portfolio || {};
+  const u = R.universe || {}, tt = R.trend_template || {}, vc = R.vcp || {}, tr = R.trade || {}, rk = R.risk || {},
+    ps = R.positions || {}, sc = R.schedule || {}, fd = R.fundamentals || {};
+  const P = (x, d = 0) => fmt.pct(x, d, false);
+  const tz = st.local_timezone;
+  const tzName = (() => { try { return new Date().toLocaleTimeString("en-US", { timeZone: tz, timeZoneName: "short" }).split(" ").pop(); } catch { return ""; } })();
+  const ex = (pf.plan?.rows || []).find((r) => r.shares) || null;
+  let exitRows = "";
+  if (ex) {
+    const e = ex.entry, Rr = e - ex.stop;
+    const partial = Math.min(e * (1 + ps.partial_profit_at_pct), e + ps.partial_profit_at_r * Rr);
+    exitRows = `<p class="ink2">Example with <b>${esc(ex.ticker)}</b> bought at ${fmt.px(e)} with stop ${fmt.px(ex.stop)}: R = ${fmt.px(Rr)} per share.</p>
+      <ul><li>Best close ≥ <b>${fmt.px(e + ps.breakeven_at_r * Rr)}</b> → stop to breakeven ${fmt.px(e)}</li>
+      <li>Best close ≥ <b>${fmt.px(e + ps.lock_in_at_r * Rr)}</b> → stop to ${fmt.px(e + Rr)} (entry + 1R)</li>
+      <li>First of +${P(ps.partial_profit_at_pct)} / +${ps.partial_profit_at_r}R at <b>${fmt.px(partial)}</b> → sell ⅓–½</li></ul>`;
+  }
+  const modeRow = (m, when, risk, pos, maxInv) => `<tr class="${pf.mode === m ? "on" : ""}"><td class="l">${chip(MODE_KIND[m] || "", m[0].toUpperCase() + m.slice(1))}${pf.mode === m ? ' <span class="muted">← now</span>' : ""}</td><td class="l wrap">${when}</td><td>${risk}</td><td>${pos}</td><td>${maxInv}</td></tr>`;
+  const exp = rk.exposure_by_market || {}, expm = rk.exposure_by_mode || {};
+  const digests = (sc.digest_times_et || []).map((t) => `<b>${etToLocal(t, tz)}</b>`).join(", ");
+
+  app.innerHTML = `<div class="prose guide">
   <h1>How the scanner works</h1>
-  <p class="ink2">An automated version of Mark Minervini's SEPA® approach (<i>Trade Like a Stock Market Wizard</i>, <i>Think &amp; Trade Like a Champion</i>). It narrows ~3,000 NASDAQ stocks to a handful of low-risk entry points. It is a decision aid, not advice - you place every order.</p>
-  <h2>1 · Market first</h2>
-  <ul><li>QQQ above its rising 50-day MA, 50-day above 200-day, and ≤ 4 distribution days in 25 sessions = <b>Confirmed uptrend</b>.</li>
-  <li>Breadth: share of stocks above their 50-day MA, new highs vs lows, and the number of Trend Template stocks (leaders expand in healthy markets).</li></ul>
-  <h2>2 · Trend Template (all 8 must pass)</h2>
-  <ol><li>Price above the 150-day and 200-day MA</li><li>150-day MA above the 200-day MA</li><li>200-day MA rising for at least 1 month</li><li>50-day MA above the 150 and 200-day MA</li><li>Price above the 50-day MA</li><li>Price ≥ 30% above its 52-week low</li><li>Price within 25% of its 52-week high</li><li>Relative Strength rating ≥ 70 (IBD-style: 40% weight on the last quarter, 20% on each of the prior three, ranked against all NASDAQ stocks)</li></ol>
-  <h2>3 · Volatility Contraction Pattern (VCP)</h2>
-  <ul><li>From the base high, each pullback must be shallower than the one before (e.g. 25% → 12% → 5%) - 2 to 6 contractions.</li>
-  <li>First contraction ≤ 40%, last contraction ≤ 12% (tight), base ≥ 3 weeks; volume should dry up in the final contraction.</li>
-  <li><b>Pivot</b> = high of the last contraction. That's the buy point.</li></ul>
-  <h2>4 · Fundamentals (SEPA)</h2>
-  <ul><li>Latest quarter EPS up ≥ ${fmt.pct(st.min_eps_growth, 0, false)} vs a year ago (or a loss-to-profit turnaround), and sales up ≥ ${fmt.pct(st.min_sales_growth, 0, false)} or accelerating.</li>
-  <li>Bonus for acceleration (growth rate rising quarter after quarter), expanding margins, positive earnings surprises, and "Code 33" (EPS, sales and margins accelerating 3 quarters).</li>
-  <li>Sources: Yahoo Finance (adjusted EPS, estimates, next report date) and SEC EDGAR filings (revenue and net income history).</li></ul>
-  <h2>5 · Buying</h2>
-  <ul><li>Buy as the stock trades through the pivot, ideally on volume ≥ 140% of its 50-day average; never more than ${fmt.pct(st.buy_zone_pct, 0, false)} above the pivot.</li>
-  <li>Initial stop just below the low of the last contraction, capped at ${fmt.pct(st.max_stop_pct, 0, false)} below the entry.</li>
-  <li>Position size = equity × ${fmt.pct(st.risk_per_trade_pct, 2, false)} ÷ (entry − stop), max 25% of equity in one stock. Equity used: ${fmt.usd(st.equity)}.</li>
-  <li>Avoid opening new positions in the days right before an earnings report.</li></ul>
-  <h2>6 · Selling</h2>
-  <ul><li>Sell at the stop, no exceptions.</li><li>Once up ${pr.breakeven_at_r}× your initial risk, raise the stop to breakeven; at ${pr.lock_in_at_r}R lock in +1R.</li>
-  <li>Sell ⅓–½ into strength at +${pr.partial_profit_at_r}R or ${fmt.pct(pr.partial_profit_at_pct, 0)}, or on a climax run (${fmt.pct(pr.climax_gain_pct, 0)} in ${pr.climax_days} sessions).</li>
-  <li>Sell the rest on a close below the 50-day MA; a close below the 21-day EMA is a warning to tighten.</li></ul>
-  <h2>Status labels</h2>
+  <p class="ink2">An automated version of Mark Minervini's SEPA method (<i>Trade Like a Stock Market Wizard</i>, <i>Think &amp; Trade Like a Champion</i>). It narrows every NASDAQ stock down to a handful of low-risk entry points and tells you how much to buy and when to sell. It describes the system's rules - it's not personal advice, and you place every order yourself.</p>
+
+  <h2>1 · How the watchlist is built</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th class="l">Step</th><th class="l">What's checked</th><th>Stocks left</th></tr></thead><tbody>
+    <tr><td class="l">Universe</td><td class="l wrap">All NASDAQ common stocks - no ETFs, warrants, SPACs or preferred shares</td><td>${fmt.int(c.universe)}</td></tr>
+    <tr><td class="l">Liquidity</td><td class="l wrap">Price ≥ $${u.min_price}, ≥ ${fmt.int(u.min_avg_volume)} shares and ≥ ${fmt.usd(u.min_avg_dollar_volume)} traded a day</td><td>${fmt.int(c.liquid)}</td></tr>
+    <tr><td class="l">Trend Template</td><td class="l wrap">All 8 checks: price above the 50/150/200-day averages; 150 above 200; 200-day rising ≥ 1 month; 50 above 150 and 200; ≥ ${P(tt.min_above_52w_low)} above the 52-week low; within ${P(tt.max_below_52w_high)} of the 52-week high; RS rating ≥ ${tt.min_rs_rating}</td><td>${fmt.int(c.tt_pass)}</td></tr>
+    <tr><td class="l">VCP base</td><td class="l wrap">${vc.min_contractions}–${vc.max_contractions} pullbacks, each shallower than the last; first ≤ ${P(vc.max_base_depth)}, last ≤ ${P(vc.max_final_depth)} and ≥ ${vc.min_final_contraction_bars} sessions long; base ≥ ${Math.round(vc.min_base_days / 5)} weeks; pivot within ${P(vc.max_pivot_below_base_high)} of the base high</td><td>${fmt.int(c.vcp)}</td></tr>
+    <tr><td class="l">Fundamentals</td><td class="l wrap">Latest quarter EPS ≥ +${P(fd.min_eps_growth)} vs a year ago (or loss → profit), and sales ≥ +${P(fd.min_sales_growth)} or accelerating</td><td>pass / below</td></tr>
+  </tbody></table></div>
+  <p>The <b>RS rating</b> (1–99) ranks the stock's 12-month performance against every NASDAQ stock, with the latest quarter counted double. Each stock's <b>score</b> blends RS (25%), base quality (30% - a tight last pullback, drying-up volume, a shallow base), fundamentals (30%) and closeness to the buy point (15%), minus a penalty if the 50-day average is falling.
+  <b>Watchlist</b> = the top ${st.watchlist_size} stocks with a base. <b>Stocks to watch</b> (the ${st.top_n} in your messages) = Breakout, Buy zone or Ready, fundamentals pass, and no earnings in the next 3 days.</p>
+
+  <h2>2 · Status labels</h2>
+  <p>The <b>pivot</b> is the high of the last pullback in the base - the price the stock has to break through.</p>
   <ul>${Object.entries(S.status_help || {}).map(([k, v]) => `<li>${statusChip(k)} ${esc(v)}</li>`).join("")}</ul>
-  <h2>Schedule</h2>
-  <ul><li>Full NASDAQ scan every trading day after the close (~45 min after 4 pm ET), followed by a "plan for next session" message.</li>
-  <li>Every 15 minutes while the market is open: live prices for the watchlist and your positions → breakout, near-pivot, stop and exit alerts. A full digest goes out at the times set in config.yaml.</li></ul>
+
+  <h2>3 · Reading a chart</h2>
+  <div class="panel">${vcpDiagram()}</div>
+  <p class="ink2">Compare every stock page against this picture:</p>
+  <ul>
+    <li><b>Trend:</b> <span class="sw" style="background:var(--series-1)"></span> 50-day above <span class="sw" style="background:var(--series-2)"></span> 150-day above <span class="sw" style="background:var(--series-3)"></span> 200-day, all rising, price on top. Lower highs and a 50-day average turning down mean the trend is stalling.</li>
+    <li><b>Base:</b> markers <i>Base high</i>, <i>C1, C2, C3</i> with each pullback's depth - they should shrink - and <i>Pivot</i> at the high of the last one, which should be near the top of the base.</li>
+    <li><b>Lines:</b> dashed black <i>Pivot</i>, green <i>Max buy</i> (+${P(tr.buy_zone_pct)}), red <i>Stop</i>.</li>
+    <li><b>Volume:</b> grey = normal, <b style="color:var(--series-1)">blue</b> = heavy buying day, <b style="color:var(--critical)">red</b> = heavy selling day (≥ ${tr.breakout_volume_ratio}× average). Volume should shrink in the last pullback and spike blue on the breakout.</li>
+    <li><b>RS line</b> (below the chart): the stock vs QQQ. Rising = beating the market; a new high before price breaks out is a leadership tell.</li>
+    <li><b>Fundamentals:</b> quarterly EPS and revenue with growth vs a year ago; <b>bold</b> = growth speeding up.</li>
+  </ul>
+
+  <h2>4 · Entering a trade</h2>
+  <ol>
+    <li>The buy point is the <b>pivot line</b> - computed for you. Before the open, a SEPA trader places a <b>buy-stop</b> a few cents above it.</li>
+    <li>Only count the breakout on volume ≥ <b>${tr.breakout_volume_ratio}×</b> the 50-day average (the app flags light-volume breakouts).</li>
+    <li>Never pay more than <b>Max buy</b> (pivot + ${P(tr.buy_zone_pct)}); above that it's Extended - wait for the next base.</li>
+    <li>Avoid opening a position in the days before an earnings report, and don't buy when the market is in correction.</li>
+  </ol>
+
+  <h2>5 · How much to buy</h2>
+  <p class="formula"><b>Shares = capital × risk per trade ÷ (entry − stop)</b></p>
+  <p>Position size comes from the stop distance, not conviction. Then the caps apply: ≤ ${rk.max_positions} positions, and total open risk ≤ ${P(rk.max_open_risk_pct)} of capital if every stop were hit.</p>
+  <div class="tablewrap"><table><thead><tr><th class="l">Mode</th><th class="l">When</th><th>Risk / trade</th><th>Max position</th><th>Max invested</th></tr></thead><tbody>
+    ${modeRow("defensive", "Market in correction", "0 (no buys)", "–", P(expm.defensive || 0))}
+    ${modeRow("pilot", "No open positions, or most are losing", P(rk.risk_per_trade_pct / 2, 3), P(rk.max_position_pct / 2, 1), P(expm.pilot))}
+    ${modeRow("normal", "Some positions up ≥ 1× their initial risk (1R)", P(rk.risk_per_trade_pct, 2), P(rk.max_position_pct), P(expm.normal))}
+    ${modeRow("full", "≥ 2 positions up ≥ 1R, one ≥ 2R, none losing", P(rk.full_risk_per_trade_pct, 1), P(rk.max_position_pct), P(expm.full))}
+  </tbody></table></div>
+  <p class="muted">The market also caps exposure: uptrend ${P(exp.uptrend)}, under pressure ${P(exp.pressure)}, correction ${P(exp.correction)}. Capital now: ${fmt.usd(pf.capital)} (${esc(pf.capital_source || "")}).</p>
+  ${ex ? `<p>Example: <b>${esc(ex.ticker)}</b> at ${fmt.px(ex.entry)}, stop ${fmt.px(ex.stop)} → <b>${fmt.int(ex.shares)} shares ≈ ${fmt.usd(ex.value)}</b> (${P(ex.pct_capital, 1)} of capital), risking ${fmt.usd(ex.risk_amount)} - limited by ${esc(ex.limit)}. Buying above the pivot means a wider stop distance, so fewer shares.</p>` : ""}
+
+  <h2>6 · When to sell</h2>
+  <p><b>R</b> = your initial risk per share (entry − stop). The rules use the best close since you bought:</p>
+  <div class="tablewrap"><table><thead><tr><th class="l">Trigger</th><th class="l">Action</th></tr></thead><tbody>
+    <tr><td class="l">Close at or below the stop</td><td class="l">${chip("critical", "EXIT")} sell everything - no exceptions</td></tr>
+    <tr><td class="l">Up ${ps.breakeven_at_r}R</td><td class="l">Raise the stop to breakeven</td></tr>
+    <tr><td class="l">Up ${ps.lock_in_at_r}R</td><td class="l">Raise the stop to entry + 1R</td></tr>
+    <tr><td class="l">+${P(ps.partial_profit_at_pct)} or +${ps.partial_profit_at_r}R, whichever first</td><td class="l">${chip("good", "SELL PARTIAL")} sell ⅓–½ into strength</td></tr>
+    <tr><td class="l">+${P(ps.climax_gain_pct)} within ${ps.climax_days} sessions (climax run)</td><td class="l">${chip("good", "SELL PARTIAL")} sell into strength</td></tr>
+    <tr><td class="l">Close below the 21-day EMA</td><td class="l">${chip("serious", "TIGHTEN")} tighten the stop or trim</td></tr>
+    <tr><td class="l">Close below the 50-day MA</td><td class="l">${chip("critical", "EXIT")} sell the rest</td></tr>
+    <tr><td class="l">Earnings within ${ps.earnings_warning_days} days</td><td class="l">Less than 1R of profit: consider reducing. More: OK to hold</td></tr>
+  </tbody></table></div>
+  ${exitRows}
+  <p class="muted">The app only manages trades it knows about: IBKR positions once connected, or what you list in <code>positions.yaml</code> - include the plan's stop, otherwise it assumes ${P(ps.default_stop_pct)} below your entry.</p>
+
+  <h2>7 · Your day${tzName ? ` (${esc(tzName)})` : ""}</h2>
+  <ul>
+    <li><b>${etToLocal(addMinutes("16:00", sc.full_scan_after_close_minutes || 45), tz)}</b> - nightly scan done; "plan for next session" message. Decide which Ready stocks get buy-stops.</li>
+    <li><b>${etToLocal("09:30", tz)}</b> - US market opens. Digests at ${digests}; breakout, near-pivot and exit alerts any time in between.</li>
+    <li><b>${etToLocal("16:00", tz)}</b> - market closes.</li>
+  </ul>
+  <p class="muted">Data: Yahoo Finance (prices, EPS, earnings dates - free, ~15 min delayed) and SEC EDGAR filings (revenue, margins). Pattern detection is mechanical - always look at the chart before you buy.</p>
   </div>`;
 }
 

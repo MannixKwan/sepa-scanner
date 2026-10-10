@@ -153,6 +153,10 @@ def _summary(cfg, mode, market, rows, positions, counts, portfolio, industries) 
                 "default_stop_pct", "breakeven_at_r", "lock_in_at_r", "partial_profit_at_r",
                 "partial_profit_at_pct", "climax_gain_pct", "climax_days")},
             "local_timezone": cfg["notifications"]["local_timezone"],
+            "rules": {k: cfg[k] for k in ("universe", "trend_template", "vcp", "trade", "risk", "positions",
+                                          "schedule", "fundamentals")},
+            "top_n": cfg["notifications"]["top_n"],
+            "watchlist_size": cfg["dashboard"]["watchlist_size"],
         },
     }
 

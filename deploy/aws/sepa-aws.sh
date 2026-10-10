@@ -3,6 +3,7 @@
 #
 #   deploy/aws/sepa-aws.sh plan          what would be created + monthly cost (changes nothing)
 #   deploy/aws/sepa-aws.sh up            create on first run, otherwise push code/config and restart
+#   deploy/aws/sepa-aws.sh push          push code, config.yaml, positions.yaml, .env messaging (no AWS login needed)
 #   deploy/aws/sepa-aws.sh credentials   store your IBKR login on the server and start IB Gateway
 #   deploy/aws/sepa-aws.sh ibkr-check    test the server's IBKR connection
 #   deploy/aws/sepa-aws.sh ibkr-restart  log IB Gateway in again with the stored login (2FA prompt follows)
@@ -116,6 +117,18 @@ cmd_up() {
   rsh 'cloud-init status --wait >/dev/null 2>&1; test -f /opt/sepa/.cloud-init-done' \
     || die "first-boot setup failed - check: ssh in and run 'sudo cat /var/log/cloud-init-output.log'"
 
+  sync_and_start
+  cat <<EOF
+
+Deployed. Dashboard (works from anywhere; the HTTPS certificate takes ~1 minute on first start):
+  https://$HOST/?k=$(rsh "grep '^DASHBOARD_TOKEN=' $R/.env | cut -d= -f2-")
+
+The server runs its first full scan now (~3-5 min with the seeded cache).
+Next: $0 credentials   (connect IBKR)
+EOF
+}
+
+sync_and_start() {  # needs IP and HOST
   echo "uploading code and config ..."
   rsync_ --delete --exclude __pycache__ minervini requirements.txt deploy "ubuntu@$IP:$R/app/"
   rsync_ deploy/aws/docker-compose.yml deploy/aws/Caddyfile config.yaml positions.yaml "ubuntu@$IP:$R/"
@@ -139,19 +152,21 @@ cmd_up() {
   } | rsh "umask 077; cat > $R/.env"
   rsh "cd $R && touch ib.env secrets/tws_password.txt && chmod 600 ib.env secrets/tws_password.txt"
 
+  # IB Gateway is only (re)applied if already running - starting it means a 2FA login (see: ibkr-restart)
   echo "building and starting containers (first build ~2-3 min) ..."
   rsh "cd $R && { sudo docker compose up -d --build --remove-orphans scanner caddy \
-       && if [ -s secrets/tws_password.txt ]; then sudo docker compose --profile ibkr up -d; fi; } > deploy.log 2>&1; \
+       && if [ -n \"\$(sudo docker compose --profile ibkr ps -q --status running ib-gateway)\" ]; then \
+            sudo docker compose --profile ibkr up -d ib-gateway; fi; } > deploy.log 2>&1; \
        rc=\$?; tail -4 deploy.log; exit \$rc" || die "container start failed - see $R/deploy.log on the server"
 
-  cat <<EOF
+}
 
-Deployed. Dashboard (works from anywhere; the HTTPS certificate takes ~1 minute on first start):
-  https://$HOST/?k=$token
-
-The server runs its first full scan now (~3-5 min with the seeded cache).
-Next: $0 credentials   (connect IBKR)
-EOF
+cmd_push() {
+  IP="$(server_ip)"; [ -n "$IP" ] || die "not deployed yet - run: $0 up"
+  HOST="$(host_of "$IP")"
+  [ -f positions.yaml ] || cp positions.example.yaml positions.yaml
+  sync_and_start
+  echo "pushed. The scanner restarted with the new code/config."
 }
 
 cmd_credentials() {
@@ -216,6 +231,7 @@ case "${1:-}" in
   plan) cmd_plan ;;
   up) cmd_up ;;
   credentials) cmd_credentials ;;
+  push) cmd_push ;;
   ibkr-check) cmd_ibkr_check ;;
   ibkr-restart) cmd_ibkr_restart ;;
   status) cmd_status ;;
@@ -223,5 +239,5 @@ case "${1:-}" in
   ssh) cmd_ssh ;;
   allow-ip) cmd_allow_ip ;;
   destroy) cmd_destroy ;;
-  *) sed -n '2,16p' "$0"; exit 1 ;;
+  *) sed -n '2,17p' "$0"; exit 1 ;;
 esac

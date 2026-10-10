@@ -251,3 +251,24 @@ details summary { cursor: pointer; color: var(--ink-2); font-size: 12px; margin-
 .xres { position: absolute; top: 0; bottom: 0; background: var(--wash-blue); }
 .xtgt { position: absolute; top: -4px; width: 2px; height: 20px; background: var(--ink); }
 .xlab { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+
+/* guide page */
+.guide { max-width: 900px; }
+.guide td.wrap { white-space: normal; min-width: 220px; }
+.guide tr.on td { background: var(--surface-2); }
+.guide .sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; vertical-align: middle; }
+.guide .formula { font-size: 16px; padding: 10px 14px; background: var(--surface-2); border-radius: 10px; display: inline-block; }
+.diagram { width: 100%; height: auto; display: block; }
+.diagram text { fill: var(--ink-2); font-size: 12px; }
+.diagram text.lab { font-size: 11px; }
+.diagram text.em { fill: var(--ink); font-weight: 600; }
+.diagram text.crit { fill: var(--critical); font-weight: 600; }
+.diagram .px { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.diagram .dot { fill: var(--ink); stroke: var(--surface); stroke-width: 2; }
+.diagram .piv { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.diagram .stp { stroke: var(--critical); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.diagram .zone { fill: var(--wash-good); }
+.diagram .vb { fill: var(--axis); }
+.diagram .vb.hv { fill: var(--series-1); }
+.diagram .base { stroke: var(--axis); }
+.diagram .lead { stroke: var(--ink-2); stroke-width: 1; }

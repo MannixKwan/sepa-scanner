@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from . import notify
+from . import notify, site
 from .marketclock import Market
 from .pipeline import full_scan, intraday_refresh, load_scan
 from .server import serve_background
@@ -35,6 +35,7 @@ def _safe(fn, what: str, cfg: dict, state: State):
 
 
 def run_forever(cfg: dict) -> None:
+    site.copy_static()   # a deploy's new dashboard files go live immediately, not at the next scan
     if cfg["dashboard"]["enabled"]:
         serve_background(cfg)
     mk = Market()
