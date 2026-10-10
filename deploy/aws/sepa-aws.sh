@@ -22,6 +22,7 @@ RAM_GB="${SEPA_RAM_GB:-4}"
 KEY_NAME="$NAME-key"
 IP_NAME="$NAME-ip"
 KEY_FILE="$HOME/.ssh/$NAME.pem"
+IP_CACHE="$HOME/.ssh/$NAME.ip"        # remembered after 'up' so day-to-day commands don't need 'aws login'
 R=/opt/sepa
 ls_() { aws lightsail --region "$REGION" --output text "$@"; }
 
@@ -34,6 +35,10 @@ bundle() {  # cheapest active Linux bundle with RAM_GB, excluding IPv6-only bund
 }
 static_ip() { ls_ get-static-ip --static-ip-name "$IP_NAME" --query staticIp.ipAddress 2>/dev/null || true; }
 host_of() { echo "${1//./-}.sslip.io"; }
+server_ip() {  # cached address, else ask AWS
+  if [ -s "$IP_CACHE" ]; then cat "$IP_CACHE"; return; fi
+  need_login; static_ip
+}
 my_ip() { curl -fsS https://checkip.amazonaws.com | tr -d '[:space:]'; }
 SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o ServerAliveInterval=30)
 rsh() { ssh "${SSH_OPTS[@]}" "ubuntu@$IP" "$@"; }
@@ -100,7 +105,7 @@ cmd_up() {
   if [ "$(ls_ get-static-ip --static-ip-name "$IP_NAME" --query staticIp.attachedTo)" != "$NAME" ]; then
     ls_ attach-static-ip --static-ip-name "$IP_NAME" --instance-name "$NAME" >/dev/null
   fi
-  IP="$(static_ip)"; HOST="$(host_of "$IP")"
+  IP="$(static_ip)"; HOST="$(host_of "$IP")"; echo "$IP" > "$IP_CACHE"
   [ "$created" = 1 ] && ssh-keygen -R "$IP" >/dev/null 2>&1 || true
   firewall
 
@@ -149,7 +154,7 @@ EOF
 }
 
 cmd_credentials() {
-  need_login; IP="$(static_ip)"; [ -n "$IP" ] || die "not deployed yet - run: $0 up"
+  IP="$(server_ip)"; [ -n "$IP" ] || die "not deployed yet - run: $0 up"
   cat <<'EOF'
 Your IBKR login is stored only on your server (/opt/sepa/secrets, readable by you and root there).
 Strongly recommended: use a SECOND IBKR username for the server (Client Portal -> Settings ->
@@ -172,19 +177,19 @@ EOF
 }
 
 cmd_ibkr_check() {
-  need_login; IP="$(static_ip)"
+  IP="$(server_ip)"
   rsh "cd $R && sudo docker compose exec -T scanner python -m minervini ibkr-check"
 }
 
 cmd_status() {
-  need_login; IP="$(static_ip)"; [ -n "$IP" ] || die "not deployed"
+  IP="$(server_ip)"; [ -n "$IP" ] || die "not deployed"
   rsh "cd $R && sudo docker compose --profile ibkr ps --format 'table {{.Service}}\t{{.Status}}' \
        && echo && sudo docker compose logs --tail 12 --no-log-prefix scanner"
   echo; echo "Dashboard: https://$(host_of "$IP")/?k=$(rsh "grep '^DASHBOARD_TOKEN=' $R/.env | cut -d= -f2-")"
 }
 
-cmd_logs() { need_login; IP="$(static_ip)"; rsh -t "cd $R && sudo docker compose --profile ibkr logs -f --tail 100 ${1:-scanner}"; }
-cmd_ssh() { need_login; IP="$(static_ip)"; ssh "${SSH_OPTS[@]}" -t "ubuntu@$IP" "cd $R; exec bash -l"; }
+cmd_logs() { IP="$(server_ip)"; rsh -t "cd $R && sudo docker compose --profile ibkr logs -f --tail 100 ${1:-scanner}"; }
+cmd_ssh() { IP="$(server_ip)"; ssh "${SSH_OPTS[@]}" -t "ubuntu@$IP" "cd $R; exec bash -l"; }
 cmd_allow_ip() { need_login; firewall; }
 
 cmd_destroy() {
@@ -195,7 +200,7 @@ cmd_destroy() {
   ls_ delete-instance --instance-name "$NAME" >/dev/null || true
   ls_ release-static-ip --static-ip-name "$IP_NAME" >/dev/null || true
   ls_ delete-key-pair --key-pair-name "$KEY_NAME" >/dev/null || true
-  rm -f "$KEY_FILE"
+  rm -f "$KEY_FILE" "$IP_CACHE"
   echo "deleted."
 }
 
