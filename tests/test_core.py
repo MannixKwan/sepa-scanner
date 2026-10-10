@@ -97,6 +97,25 @@ class VcpTest(unittest.TestCase):
         self.assertEqual(r["setup"]["breakout_days_ago"], 2)
         self.assertEqual(r["status"], "BUY ZONE")
 
+    def test_lower_highs_and_one_day_dip_is_not_a_vcp(self):
+        # EZPW-like: base high 100, lower highs (97, then 84), last "contraction" a 1-day wiggle
+        px = list(np.linspace(40, 100, 260))
+        for a_, b_, n_ in [(100, 74, 30), (74, 97, 20), (97, 78, 15), (78, 84, 8), (84, 81.5, 1), (81.5, 83.5, 2)]:
+            px += leg(a_, b_, n_)
+        v = detect_vcp(frame(px), CFG, end_offset=1)
+        self.assertFalse(v["valid"], v)
+        self.assertGreater(v["pivot"], 90)          # the 1-day dip's high (~84) is not taken as the pivot
+
+    def test_tight_base_far_below_highs_is_not_a_vcp(self):
+        # contractions shrink (26% -> 5%) but the last one tightens 14% below the base high
+        px = list(np.linspace(40, 100, 260))
+        for a_, b_, n_ in [(100, 74, 30), (74, 86, 20), (86, 82, 8), (82, 85, 8)]:
+            px += leg(a_, b_, n_)
+        v = detect_vcp(frame(px), CFG, end_offset=1)
+        self.assertLessEqual(v["final_depth"], 0.06)
+        self.assertGreater(v["pivot_below_base_high"], 0.10)
+        self.assertFalse(v["valid"], v)
+
     def test_new_highs_have_no_base(self):
         self.assertIsNone(detect_vcp(frame(np.linspace(40, 100, 300)), CFG))
 

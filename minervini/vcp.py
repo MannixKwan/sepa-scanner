@@ -57,8 +57,8 @@ def detect_vcp(df: pd.DataFrame, cfg: dict, end_offset: int = 1) -> dict | None:
             break
 
     contractions = [(peaks[k], troughs[k]) for k in range(len(troughs))]
-    # A pullback that started < 3 sessions ago is noise, not a contraction yet.
-    while len(contractions) > 1 and (n - 1 - contractions[-1][0]) < 3:
+    # A pullback that started less than a week ago is noise, not a contraction yet.
+    while len(contractions) > 1 and (n - 1 - contractions[-1][0]) < vc["min_final_contraction_bars"]:
         contractions.pop()
     if not contractions:
         return None
@@ -67,6 +67,7 @@ def detect_vcp(df: pd.DataFrame, cfg: dict, end_offset: int = 1) -> dict | None:
     piv_i, last_t = contractions[-1]
     pivot = float(hi[piv_i])
     stop_ref = float(lo[last_t])
+    pivot_below_high = 1 - pivot / hi[p0]   # a real VCP tightens up near the top of its base
 
     vol50 = float(np.mean(vol[max(0, n - 50):n])) or 1.0
     last_leg = vol[piv_i:n]
@@ -84,6 +85,7 @@ def detect_vcp(df: pd.DataFrame, cfg: dict, end_offset: int = 1) -> dict | None:
         vc["min_contractions"] <= count <= vc["max_contractions"]
         and depths[0] <= vc["max_base_depth"]
         and depths[-1] <= vc["max_final_depth"]
+        and pivot_below_high <= vc["max_pivot_below_base_high"]
     )
 
     # Quality 0-100: tight final contraction, volume dry-up, orderly progression, shallow base.
@@ -100,6 +102,8 @@ def detect_vcp(df: pd.DataFrame, cfg: dict, end_offset: int = 1) -> dict | None:
         notes.append(f"Base too deep ({depths[0]:.0%})")
     if depths[-1] > vc["max_final_depth"]:
         notes.append(f"Last contraction not tight yet ({depths[-1]:.0%})")
+    if pivot_below_high > vc["max_pivot_below_base_high"]:
+        notes.append(f"Pivot {pivot_below_high:.0%} below the base high - not tightening near the highs")
     if count < vc["min_contractions"]:
         notes.append("Only one contraction so far")
     if dryup <= vc["volume_dryup_ratio"]:
@@ -121,6 +125,7 @@ def detect_vcp(df: pd.DataFrame, cfg: dict, end_offset: int = 1) -> dict | None:
         ],
         "pivot": round(pivot, 2),
         "pivot_date": _d(idx[piv_i]),
+        "pivot_below_base_high": round(float(pivot_below_high), 4),
         "stop_ref": round(stop_ref, 2),
         "base_start": _d(idx[p0]),
         "base_days": int(base_days),

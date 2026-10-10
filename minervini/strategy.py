@@ -106,6 +106,7 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
     rs_new_high = bool(rsl is not None and len(rsl) > 60 and rsl.iloc[-1] >= rsl.iloc[-252:].max() * 0.998)
     price_new_high = bool(df["high"].iloc[-1] >= df["high"].iloc[-252:].max())
 
+    sma50_falling = bool(len(df) > 70 and df["sma50"].iloc[-1] < df["sma50"].iloc[-22])
     m = (fund or {}).get("metrics", {})
     days_to_earn = _days_until((fund or {}).get("next_earnings"))
     pivot_dist = (price / setup["pivot"] - 1) if setup else None
@@ -119,7 +120,8 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
     score = 0.25 * (rs or 0) + 0.30 * vcp_q + 0.30 * fund_s + 0.15 * prox
     score += 3 if rs_new_high else 0
     score += 5 if m.get("code33") else 0
-    score = int(round(min(score, 100)))
+    score -= 8 if sma50_falling else 0
+    score = int(round(max(0, min(score, 100))))
 
     # ------------------------------------------------------- why / red flags
     reasons, flags = [], []
@@ -152,6 +154,8 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
 
     if days_to_earn is not None and 0 <= days_to_earn <= cfg["positions"]["earnings_warning_days"]:
         flags.append(f"Earnings in {days_to_earn} day{'s' if days_to_earn != 1 else ''} - avoid opening a new position right before the report")
+    if sma50_falling:
+        flags.append("50-day MA lower than a month ago - the uptrend is stalling")
     if status == "EXTENDED":
         flags.append("Extended beyond the buy zone - don't chase")
     if status in ("BREAKOUT", "BUY ZONE") and setup and setup.get("breakout_days_ago") == 0 and vol_ratio < tr["breakout_volume_ratio"]:
