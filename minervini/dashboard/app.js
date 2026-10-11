@@ -143,7 +143,7 @@ function pickCard(r) {
       <div><div class="tk">${esc(r.ticker)}</div><div class="nm" title="${esc(r.name)}">${esc(r.name)}</div></div>
       <div class="px"><b class="num">${fmt.px(r.price)}</b><div class="num ${dir(r.change_pct)}">${fmt.pct(r.change_pct)}</div></div>
     </div>
-    <div class="facts">${statusChip(r.status)}${boChip(r.breakout)}<span class="tag">${pivotText(r)}</span><span class="tag">Score ${r.score}</span>${gradeOf(r) ? `<span class="tag" title="${esc(GRADE_HELP[gradeOf(r)])}">Volume ${gradeOf(r)}</span>` : ""}${s.base_number ? `<span class="tag" title="Base count in this advance - 1st and 2nd stage bases have the best odds">${ordinal(s.base_number)}-stage base</span>` : ""}</div>
+    <div class="facts">${statusChip(r.status)}${boChip(r.breakout)}${ordersView().some((o) => o.ticker === r.ticker && o.status === "PENDING") ? '<span class="tag">📝 Order placed</span>' : ""}<span class="tag">${pivotText(r)}</span><span class="tag">Score ${r.score}</span>${gradeOf(r) ? `<span class="tag" title="${esc(GRADE_HELP[gradeOf(r)])}">Volume ${gradeOf(r)}</span>` : ""}${s.base_number ? `<span class="tag" title="Base count in this advance - 1st and 2nd stage bases have the best odds">${ordinal(s.base_number)}-stage base</span>` : ""}</div>
     ${meter(p.stop, p.entry, p.buy_zone_hi, r.price)}
     <div class="kv num">
       <div><div class="k">Buy above</div><div class="v">${fmt.px(p.entry)}</div></div>
@@ -162,7 +162,7 @@ function pickCard(r) {
 function positionCard(p, compact = false) {
   const t = p.targets || {};
   const sig = (p.signals || []).map((s) => `<li>${s.action === "HOLD" ? ICON.dot : s.action === "SELL PARTIAL" ? ICON.plus : ICON.warn}<span>${esc(s.text)}</span></li>`).join("");
-  return `<div class="panel card" onclick="location.hash='#/t/${encodeURIComponent(p.ticker)}'">
+  return `<div class="panel card" onclick="if(!event.target.closest('button,form,input,select,a,label'))location.hash='#/t/${encodeURIComponent(p.ticker)}'">
     <div class="row1">
       <div><div class="tk">${esc(p.ticker)}</div><div class="nm">${fmt.int(p.shares)} sh @ ${fmt.px(p.entry)}${p.entry_date ? " · " + esc(p.entry_date) : ""}</div></div>
       <div class="px"><b class="num">${fmt.px(p.price)}</b><div class="num ${dir(p.gain_pct)}">${fmt.pct(p.gain_pct)} · ${p.r_multiple >= 0 ? "+" : ""}${p.r_multiple}R</div></div>
@@ -182,6 +182,7 @@ function positionCard(p, compact = false) {
       <div><div class="k">+25%</div><div class="v">${fmt.px(t["+25%"])}</div></div>
     </div>`}
     ${sig ? `<ul class="list">${sig}</ul>` : `<div class="warnline">${ICON.dot}<span>No exit signals - hold and let it work.</span></div>`}
+    ${p.source === "order" && p.order_id ? `<div class="oactions">${p.fill_estimated ? `<button class="btn sm primary" data-act="confirm-open" data-id="${p.order_id}">Confirm fill price</button>` : ""}<button class="btn sm" data-act="close-open" data-id="${p.order_id}">I sold it - close position</button></div><div class="aslot" data-for-id="${p.order_id}"></div>` : ""}
   </div>`;
 }
 
@@ -203,6 +204,8 @@ function table(id, rows, cols, defSort) {
   return `<div class="tablewrap"><table id="${id}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 document.addEventListener("click", (e) => {
+  const act = e.target.closest("[data-act]");
+  if (act) { e.preventDefault(); orderAction(act); return; }
   const th = e.target.closest("th[data-k]");
   if (th) {
     const st = sortState[th.dataset.t];
@@ -285,6 +288,146 @@ function industryBars(rows) {
     </div>`).join("")}</div>`;
 }
 
+// ------------------------------------------------------------------ buy orders
+let ORDERS = null;   // live from /api/orders; falls back to the snapshot in summary.json
+const ORDER_TYPES = { stop_limit: "Buy stop-limit", stop: "Buy stop", limit: "Buy limit", filled: "Already bought" };
+const ORDER_KIND = { PENDING: "info", TRIGGERED: "good", FILLED: "good", CANCELLED: "", EXPIRED: "", CLOSED: "" };
+
+async function loadOrders() {
+  try {
+    const r = await fetch("api/orders?_=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    ORDERS = (await r.json()).orders;
+  } catch { ORDERS = null; }
+  return ORDERS;
+}
+async function api(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-SEPA": "1" }, body: JSON.stringify(body || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `request failed (${r.status})`);
+  return j.order;
+}
+/* live order state + the latest price/distance/warnings computed by the scanner */
+function ordersView() {
+  const ann = new Map((S.orders || []).map((o) => [o.id, o]));
+  return (ORDERS || S.orders || []).map((o) => {
+    const a = ann.get(o.id) || {};
+    return { ...o, price: a.price, distance: o.status === "PENDING" ? a.distance : null, warnings: o.status === "PENDING" ? a.warnings || [] : [] };
+  });
+}
+const orderPrice = (o) => o.type === "filled" ? fmt.px(o.fill_price) : o.type === "limit" ? fmt.px(o.limit)
+  : `${fmt.px(o.trigger)}${o.type === "stop_limit" ? ` <span class="muted">limit ${fmt.px(o.limit)}</span>` : ""}`;
+
+function orderForm(pre = {}) {
+  const v = (x) => (x == null || x === "" ? "" : esc(x));
+  return `<form class="oform">
+    <div class="ogrid">
+      ${pre.ticker ? `<input type="hidden" name="ticker" value="${v(pre.ticker)}">` : `<label>Ticker<input name="ticker" required maxlength="10" autocapitalize="characters" placeholder="e.g. NSIT"></label>`}
+      <label>Order type<select name="type">
+        ${Object.entries(ORDER_TYPES).map(([k, l]) => `<option value="${k}"${k === "stop_limit" ? " selected" : ""}>${l}${k === "stop_limit" ? " (recommended)" : ""}</option>`).join("")}
+      </select></label>
+      <label data-for="stop stop_limit">Trigger price<input name="trigger" type="number" step="0.01" min="0" value="${v(pre.trigger)}"></label>
+      <label data-for="stop_limit limit">Limit price<input name="limit" type="number" step="0.01" min="0" value="${v(pre.limit)}"></label>
+      <label data-for="filled" hidden>Fill price<input name="fill_price" type="number" step="0.01" min="0" value="${v(pre.fill)}"></label>
+      <label data-for="filled" hidden>Bought on<input name="filled_date" type="date" value="${new Date().toISOString().slice(0, 10)}"></label>
+      <label>Shares<input name="shares" type="number" step="1" min="1" required value="${v(pre.shares)}"></label>
+      <label>Stop loss<input name="stop_loss" type="number" step="0.01" min="0" value="${v(pre.stop_loss)}"></label>
+      <label data-for="stop stop_limit limit">Expiry<select name="expiry"><option value="GTC">Good till cancelled</option><option value="DAY">Day only</option></select></label>
+      <label class="wide">Notes<input name="notes" maxlength="200" placeholder="optional"></label>
+    </div>
+    <p class="muted hint">Stop-limit = buys once the price trades through the trigger, but never above the limit (Max buy). Record what you placed in IBKR - this doesn't place orders.</p>
+    <div class="oactions"><button type="submit" class="btn primary">Save order</button><button type="button" class="btn" data-act="close-form">Cancel</button><span class="ostatus"></span></div>
+  </form>`;
+}
+function syncOrderFields(form) {
+  const t = form.querySelector("[name=type]").value;
+  form.querySelectorAll("[data-for]").forEach((el) => { el.hidden = !el.dataset.for.split(" ").includes(t); });
+}
+function orderLine(o, withTicker = false) {
+  const st = o.status;
+  const when = st === "PENDING" ? `placed ${esc(o.placed_at.slice(5, 10))}${o.expiry === "DAY" ? " · day order" : ""}`
+    : st === "TRIGGERED" ? `triggered ${esc(o.triggered_at || "")} at ~${fmt.px(o.fill_price_est)} (estimated)`
+    : st === "FILLED" ? `filled ${esc(o.filled_at || "")} at ${fmt.px(o.fill_price)}` : esc(st.toLowerCase());
+  const dist = o.distance != null ? ` · now ${fmt.px(o.price)} (${fmt.pct(o.distance, 1)} to go)` : "";
+  const acts = st === "PENDING" ? `<button class="btn sm" data-act="cancel" data-id="${o.id}">Cancel order</button>`
+    : st === "TRIGGERED" ? `<button class="btn sm primary" data-act="confirm-open" data-id="${o.id}">Confirm fill</button>`
+    : ["CANCELLED", "EXPIRED", "CLOSED"].includes(st) ? `<button class="btn sm" data-act="delete" data-id="${o.id}">Remove</button>` : "";
+  return `<div class="oline">
+    <div class="otop">${withTicker ? `<a class="t" href="#/t/${encodeURIComponent(o.ticker)}">${esc(o.ticker)}</a>` : ""}${chip(ORDER_KIND[st] || "", st[0] + st.slice(1).toLowerCase())}
+      <span>${esc(ORDER_TYPES[o.type])} ${orderPrice(o)} × ${fmt.int(o.shares)}</span>${o.stop_loss ? `<span class="muted">stop ${fmt.px(o.stop_loss)}</span>` : ""}</div>
+    <div class="muted small">${when}${dist}${o.notes ? " · " + esc(o.notes) : ""}</div>
+    ${(o.warnings || []).map((w) => `<div class="warnline">${ICON.warn}<span>${esc(w)}</span></div>`).join("")}
+    <div class="oactions">${acts}</div>
+    <div class="aslot" data-for-id="${o.id}"></div>
+  </div>`;
+}
+function actionForm(id, kind, o = {}) {
+  if (kind === "confirm") return `<form class="aform" data-id="${id}" data-action="confirm"><label>Actual fill price<input name="fill_price" type="number" step="0.01" min="0" required value="${o.fill_price_est ?? ""}"></label><label>Shares<input name="shares" type="number" step="1" min="1" value="${o.shares ?? ""}"></label><button class="btn sm primary">Save</button><span class="ostatus"></span></form>`;
+  return `<form class="aform" data-id="${id}" data-action="close"><label>Sold at (optional)<input name="exit_price" type="number" step="0.01" min="0"></label><button class="btn sm primary">Close position</button><span class="ostatus"></span></form>`;
+}
+function orderBox(r) {
+  const mine = ordersView().filter((o) => o.ticker === r.ticker && ["PENDING", "TRIGGERED", "FILLED"].includes(o.status));
+  const p = r.plan;
+  const pre = { ticker: r.ticker, trigger: p ? (p.entry + 0.01).toFixed(2) : "", limit: p ? p.buy_zone_hi : "", shares: p?.shares || "", stop_loss: p?.stop ?? "" };
+  return `<div class="panel">
+    <h3>Your buy orders</h3>
+    ${mine.length ? mine.map((o) => orderLine(o)).join("") : `<p class="muted">No order recorded for ${esc(r.ticker)}.</p>`}
+    <button class="btn" data-act="open-form">📝 Record a buy order</button>
+    <div class="formslot" hidden>${orderForm(pre)}</div>
+  </div>`;
+}
+function ordersSection() {
+  const all = ordersView();
+  const open = all.filter((o) => o.status === "PENDING" || o.status === "TRIGGERED");
+  const past = all.filter((o) => ["CANCELLED", "EXPIRED", "CLOSED"].includes(o.status)).slice(-10).reverse();
+  return `<h2>Buy orders <span class="sub">record the orders you place in IBKR - the scanner tells you when they trigger</span></h2>
+    <div class="panel">
+      ${open.length ? open.map((o) => orderLine(o, true)).join("") : `<p class="muted">No pending orders.</p>`}
+      <button class="btn" data-act="open-form">📝 Record an order</button>
+      <div class="formslot" hidden>${orderForm()}</div>
+      ${past.length ? `<details><summary>Order history (${past.length})</summary>${past.map((o) => orderLine(o, true)).join("")}</details>` : ""}
+    </div>`;
+}
+async function afterOrderChange(msgEl, text) {
+  if (msgEl) msgEl.textContent = text;
+  await loadOrders();
+  route(true);
+  setTimeout(async () => {     // the server recomputes positions/allocation in the background
+    try { const n = await getJSON("data/summary.json"); if (n.generated_at !== S.generated_at) { S = n; details.clear(); renderHeader(); route(true); } } catch { /* ignore */ }
+  }, 9000);
+}
+document.addEventListener("change", (e) => { if (e.target.matches(".oform [name=type]")) syncOrderFields(e.target.form); });
+document.addEventListener("submit", async (e) => {
+  const f = e.target;
+  if (!f.matches(".oform, .aform")) return;
+  e.preventDefault();
+  const msg = f.querySelector(".ostatus");
+  const data = Object.fromEntries(new FormData(f).entries());
+  try {
+    msg.textContent = "Saving…";
+    if (f.matches(".oform")) await api("api/orders", data);
+    else await api(`api/orders/${f.dataset.id}/${f.dataset.action}`, data);
+    await afterOrderChange(msg, "Saved");
+  } catch (err) { msg.textContent = "⚠️ " + err.message; }
+});
+async function orderAction(btn) {
+  const id = btn.dataset.id, act = btn.dataset.act;
+  if (act === "open-form") { const slot = btn.nextElementSibling; slot.hidden = !slot.hidden; syncOrderFields(slot.querySelector("form")); return; }
+  if (act === "close-form") { btn.closest(".formslot").hidden = true; return; }
+  const o = (ORDERS || []).find((x) => x.id === id) || {};
+  const slot = document.querySelector(`.aslot[data-for-id="${id}"]`);
+  if (act === "confirm-open" || act === "close-open") { if (slot) slot.innerHTML = actionForm(id, act === "confirm-open" ? "confirm" : "close", o); return; }
+  try {
+    btn.disabled = true;
+    await api(`api/orders/${id}/${act}`, {});
+    await afterOrderChange(null);
+  } catch (err) { btn.disabled = false; alertBox(err.message); }
+}
+function alertBox(text) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = "⚠️ " + text;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 5000);
+}
+
 function portfolioStrip(pf) {
   if (!pf) return "";
   return `<a class="panel strip" href="#/portfolio">
@@ -330,9 +473,10 @@ function viewPortfolio() {
   const other = (pf.other_holdings || []).length ? `<h2>Other holdings <span class="sub">count toward capital, not managed by the scanner</span></h2>
     <div class="tablewrap"><table><thead><tr><th class="l">Holding</th><th>Type</th><th>Qty</th><th>Value (USD)</th></tr></thead><tbody>
     ${pf.other_holdings.map((o) => `<tr><td class="l">${esc(o.symbol)} <span class="n">${esc(o.currency)}</span></td><td>${esc(o.type)}</td><td>${fmt.int(o.qty)}</td><td>${fmt.usd(o.value_usd)}</td></tr>`).join("")}</tbody></table></div>` : "";
-  const pending = (pf.pending_buys || []).length ? `<h2>Open buy orders <span class="sub">cash reserved</span></h2>
+  const ibPending = (pf.pending_buys || []).filter((b) => b.source !== "manual");   // manual ones are listed under Buy orders
+  const pending = ibPending.length ? `<h2>Open IBKR buy orders <span class="sub">cash reserved</span></h2>
     <div class="tablewrap"><table><thead><tr><th class="l">Stock</th><th>Type</th><th>Qty</th><th>Price</th><th>Reserved</th></tr></thead><tbody>
-    ${pf.pending_buys.map((b) => `<tr><td class="l"><span class="t">${esc(b.ticker)}</span></td><td>${esc(b.type)}</td><td>${fmt.int(b.qty)}</td><td>${fmt.px(b.price)}</td><td>${fmt.usd(b.value_usd)}</td></tr>`).join("")}</tbody></table></div>` : "";
+    ${ibPending.map((b) => `<tr><td class="l"><span class="t">${esc(b.ticker)}</span></td><td>${esc(b.type)}</td><td>${fmt.int(b.qty)}</td><td>${fmt.px(b.price)}</td><td>${fmt.usd(b.value_usd)}</td></tr>`).join("")}</tbody></table></div>` : "";
   const conc = (pf.concentration || []).length ? `<h2>Concentration by industry</h2><div class="panel bars">${pf.concentration.map((c) => `
     <div class="row"><div class="name">${esc(c.industry)}</div><div><div class="bt" style="width:${Math.max(3, c.pct * 100 / Math.max(...pf.concentration.map((x) => x.pct)))}%"></div></div><div class="num" style="text-align:right">${fmt.pct(c.pct, 0, false)}</div></div>`).join("")}</div>` : "";
 
@@ -356,6 +500,8 @@ function viewPortfolio() {
     <h2>If the best setups trigger <span class="sub">sized in priority order (breakouts first, then best score); each one uses up cash, slots and risk</span></h2>
     ${plan.rows.length ? table("plan", plan.rows, planCols, { key: "rank", asc: true }) : `<div class="panel empty">No actionable setups right now.</div>`}
     ${plan.rows.length ? `<p class="muted" style="margin-top:8px">Buying every sized row: ${fmt.usd(plan.total_value)} → invested ${fmt.pct(plan.exposure_after_pct, 0, false)} of capital, open risk ${fmt.pct(plan.open_risk_after_pct, 1, false)}. Only buy the ones that actually break out on volume.</p>` : ""}
+
+    ${ordersSection()}
 
     <h2>Open positions <span class="sub">${pos.length} · exit plan per Minervini's sell rules</span></h2>
     ${pos.length ? `<div class="grid cards">${pos.map((p) => positionCard(p)).join("")}</div>`
@@ -514,6 +660,8 @@ function viewRules() {
     <li>Avoid opening a position in the days before an earnings report, and don't buy when the market is in correction.</li>
   </ol>
 
+  <p class="muted">Placed a buy order in IBKR? Record it with <b>📝 Record a buy order</b> on the stock page (prefilled from the plan). The scanner checks it every 15 minutes, tells you on Telegram when it triggers, then manages it as a position. It also warns if a pending order should be cancelled (base failed, earnings coming, pivot moved).</p>
+
   <h2>5 · How much to buy</h2>
   <p class="formula"><b>Shares = capital × risk per trade ÷ (entry − stop)</b></p>
   <p>Position size comes from the stop distance, not conviction. Then the caps apply: ≤ ${rk.max_positions} positions, and total open risk ≤ ${P(rk.max_open_risk_pct)} of capital if every stop were hit.</p>
@@ -583,6 +731,7 @@ async function viewDetail(t) {
       <div class="grid">
         ${d.position ? positionCard(d.position) : ""}
         ${planPanel(r)}
+        ${orderBox(r)}
         ${whyPanel(r)}
       </div>
     </div>
@@ -908,6 +1057,7 @@ async function boot() {
     return;
   }
   renderHeader();
+  await loadOrders();
   route();
   // pick up new 15-minute refreshes automatically (detail pages keep their zoom until you navigate)
   setInterval(async () => {

@@ -68,7 +68,7 @@ def dashboard_link(cfg: dict, path: str = "") -> str:
     return url + (f"#/t/{path}" if path else "")
 
 
-def _pick_lines(f: Fmt, r: dict, k: int) -> list[str]:
+def _pick_lines(f: Fmt, r: dict, k: int, ordered: bool = False) -> list[str]:
     p = r["plan"] or {}
     m = r.get("fund") or {}
     st = r["status"]
@@ -83,7 +83,7 @@ def _pick_lines(f: Fmt, r: dict, k: int) -> list[str]:
         f"(−{p.get('risk_pct', 0) * 100:.1f}%)",
         f"    Size: {f.esc(size)}",
     ]
-    facts = [f"RS {r['rs']}"]
+    facts = (["📝 order placed"] if ordered else []) + [f"RS {r['rs']}"]
     if m.get("eps_q_yoy") is not None:
         facts.append(f"EPS {_p(m['eps_q_yoy'])}")
     if m.get("sales_q_yoy") is not None:
@@ -137,8 +137,9 @@ def build_digest(summary: dict, cfg: dict, kind: str, title: str = "SEPA watchli
     picks = summary.get("top_picks", [])
     if picks:
         lines.append(f.b("🎯 Stocks to watch"))
+        ordered = {o["ticker"] for o in summary.get("orders", []) if o["status"] == "PENDING"}
         for k, r in enumerate(picks, 1):
-            lines += _pick_lines(f, r, k)
+            lines += _pick_lines(f, r, k, r["ticker"] in ordered)
     else:
         lines.append(f.i("No actionable VCP setups right now - patience is a position."))
 
@@ -147,6 +148,21 @@ def build_digest(summary: dict, cfg: dict, kind: str, title: str = "SEPA watchli
         lines += ["", f.b("💼 Your positions")]
         for p in pos:
             lines += _position_line(f, p)
+
+    ords = [o for o in summary.get("orders", []) if o["status"] in ("PENDING", "TRIGGERED")]
+    if ords:
+        lines += ["", f.b("📝 Your buy orders")]
+        for o in ords:
+            if o["status"] == "TRIGGERED":
+                lines.append(f"{f.b(o['ticker'])} ✅ triggered at ~{o['fill_price_est']:,.2f} × {o['shares']:,} - "
+                             "confirm your fill price on the dashboard")
+                continue
+            kind = {"stop_limit": "buy stop-limit", "stop": "buy stop", "limit": "buy limit"}.get(o["type"], o["type"])
+            px = o.get("trigger") or o.get("limit")
+            where = f" · now {o['price']:,.2f} ({o['distance']:+.1%} to go)" if o.get("distance") is not None else ""
+            lines.append(f"{f.b(o['ticker'])} {kind} {px:,.2f} × {o['shares']:,}{where}")
+            for w in o.get("warnings", [])[:2]:
+                lines.append(f"    🧹 {f.esc(w)}")
     lines += ["", f.link("📊 Open dashboard", dashboard_link(cfg))]
     return "\n".join(lines)
 

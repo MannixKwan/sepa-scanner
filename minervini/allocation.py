@@ -151,12 +151,13 @@ def apply_sizing(rows: list[dict], snap: dict) -> None:
         p["shares"], p["position_value"], p["risk_amount"] = z["shares"], z["value"], z["risk_amount"]
 
 
-def allocation_plan(candidates: list[dict], snap: dict) -> dict:
-    """If the best setups trigger, which to buy and how much - consuming budget, slots and risk in order."""
+def allocation_plan(candidates: list[dict], snap: dict, skip: set[str] | None = None) -> dict:
+    """If the best setups trigger, which to buy and how much - consuming budget, slots and risk in order.
+    Stocks you already hold or have a buy order on are skipped (their cash is already counted)."""
     s = dict(snap)
     rows, total_value, total_risk = [], 0.0, 0.0
     for r in candidates:
-        if not r.get("plan"):
+        if not r.get("plan") or r["ticker"] in (skip or set()):
             continue
         entry = buy_price(r)
         z = size_position(entry, r["plan"]["stop"], s)

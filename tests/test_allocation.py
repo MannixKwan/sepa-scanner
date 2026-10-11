@@ -96,6 +96,13 @@ class SizingTest(unittest.TestCase):
         self.assertEqual(len(bought), 4)        # 4 x $12.5k fills the 50% pilot exposure
         self.assertLessEqual(plan["exposure_after_pct"], 0.5 + 1e-9)
 
+    def test_plan_skips_held_and_ordered_stocks(self):
+        s = self.snap([])
+        rows = [{"ticker": t, "name": t, "status": "READY", "price": 98, "score": 80,
+                 "plan": {"entry": 100, "stop": 95}} for t in ("A", "B", "C")]
+        plan = allocation.allocation_plan(rows, s, skip={"B"})
+        self.assertEqual([r["ticker"] for r in plan["rows"]], ["A", "C"])
+
     def test_ibkr_capital_and_margin(self):
         cfg = copy.deepcopy(CFG)
         cfg["risk"]["capital_source"] = "ibkr"

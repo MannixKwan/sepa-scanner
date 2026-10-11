@@ -225,6 +225,22 @@ Don't also run `minervini run` on your Mac once the server is live, or you'll ge
 | `python -m minervini test-notify` | Test your Telegram/WhatsApp setup |
 | `python -m minervini ibkr-check` | Test the IBKR connection and print account, positions, stops |
 
+## Recording your buy orders
+This tool doesn't place orders. When you place one in IBKR, record it on the dashboard:
+**📝 Record a buy order** on the stock page (prefilled from the trade plan: buy stop-limit at the pivot,
+limit at Max buy, plan shares and stop) or on the Portfolio page for any ticker. Use "Already bought" for
+fills you want tracked straight away.
+
+* Every refresh checks pending orders against the price action since you placed them (a high made before
+  you placed it doesn't count). A triggered order sends "✅ Buy order triggered…", becomes a position
+  managed by the exit rules (fill price estimated until you **Confirm fill**), and **I sold it - close
+  position** ends the tracking.
+* Pending orders reserve cash and a position slot in the allocation, and drop out of the sizing table.
+* Warnings (🧹) when a pending order should be cancelled or adjusted: the base failed, earnings are near,
+  the pivot moved, or the stop is now too wide. Day orders expire after their session.
+* Orders are stored in `data/orders.json` on the server (not in git). The API behind the forms needs the
+  dashboard login and rejects cross-site requests.
+
 ## Notification policy (configurable)
 * **Alerts, at once:** a breakout through a pivot (fundamentals must pass), a stock within 1.5% of its
   pivot, a failed breakout, any exit signal on your positions, a stop to raise, or a change in market

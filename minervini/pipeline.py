@@ -7,15 +7,17 @@ intraday_refresh() every 15 minutes while the market is open (~20-40 s): live pr
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from . import allocation, notify, site
+from . import allocation, notify, orders, site
 from .config import DATA_DIR
 from .edgar import SecClient
 from .fundamentals import fetch_many, get_fundamentals
@@ -33,6 +35,27 @@ log = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 SCAN_FILE = DATA_DIR / "scan_latest.json"
 IB_CACHE = DATA_DIR / "ibkr_last.json"      # last good IBKR snapshot, used while the gateway is down
+RUN_LOCK = threading.RLock()                # scans and refreshes run one at a time (scheduler, web server)
+
+
+def _serialised(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with RUN_LOCK:
+            return fn(*args, **kwargs)
+    return wrapper
+
+
+def _order_tickers() -> list[str]:
+    return list(dict.fromkeys(o["ticker"] for o in orders.load() if o["status"] in orders.WATCHED))
+
+
+def _with_orders(pos_raw: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Positions plus those from triggered/filled buy orders (unless IBKR or positions.yaml already
+    has the stock), and the pending manual buy orders."""
+    ol = orders.load()
+    have = {p["ticker"] for p in pos_raw}
+    return pos_raw + [p for p in orders.as_positions(ol) if p["ticker"] not in have], orders.as_pending_buys(ol)
 
 
 # ----------------------------------------------------------------- helpers
@@ -76,14 +99,16 @@ def _load_positions(cfg: dict) -> tuple[list[dict], dict | None]:
 
 
 def _portfolio(cfg: dict, ib: dict | None, positions: list[dict], market: dict,
-               rows: list[dict], funds: dict) -> dict:
+               rows: list[dict], funds: dict, manual_pending: list[dict] | None = None) -> dict:
     """Account snapshot, portfolio-aware share counts on every plan, and the allocation plan."""
     industries = {t: (f.get("profile") or {}).get("industry") for t, f in funds.items()}
     ib = ib or {}
     snap = allocation.snapshot(cfg, ib.get("account"), positions, market["regime"],
-                               ib.get("pending_buys"), industries, ib.get("other_holdings"))
+                               (ib.get("pending_buys") or []) + (manual_pending or []), industries,
+                               ib.get("other_holdings"))
     allocation.apply_sizing(rows, snap)
-    snap["plan"] = allocation.allocation_plan(top_picks(rows, cfg, 12), snap)
+    held = {p["ticker"] for p in positions} | {b["ticker"] for b in snap["pending_buys"]}
+    snap["plan"] = allocation.allocation_plan(top_picks(rows, cfg, 12), snap, skip=held)
     snap["ibkr_as_of"], snap["ibkr_stale"] = ib.get("as_of"), bool(ib.get("stale"))
     return snap
 
@@ -173,6 +198,7 @@ def load_scan() -> dict | None:
 
 
 # --------------------------------------------------------------- full scan
+@_serialised
 def full_scan(cfg: dict, notify_plan: bool = False) -> dict:
     t0 = time.time()
     state = State()
@@ -181,7 +207,7 @@ def full_scan(cfg: dict, notify_plan: bool = False) -> dict:
     pos_raw, ib = _load_positions(cfg)
     bench_sym = cfg["universe"]["benchmark"]
     pos_tickers = [p["ticker"] for p in pos_raw]
-    extra = [t.upper() for t in cfg["universe"]["extra_tickers"]]
+    extra = [t.upper() for t in cfg["universe"]["extra_tickers"]] + _order_tickers()
     tickers = list(dict.fromkeys(list(uni["symbol"]) + extra + pos_tickers + [bench_sym]))
 
     store = PriceStore()
@@ -236,8 +262,10 @@ def full_scan(cfg: dict, notify_plan: bool = False) -> dict:
 
     rows = [run(t) for t in passers]
     extra_rows = [run(t) for t in dict.fromkeys(pos_tickers + extra) if t in ind and t not in passers]
+    orders.process(frames, session_closed=prog is None)       # did any buy order trigger today?
+    pos_raw, manual_pending = _with_orders(pos_raw)
     positions = _eval_positions(pos_raw, frames, funds, cfg, state)
-    portfolio = _portfolio(cfg, ib, positions, market, rows + extra_rows, funds)
+    portfolio = _portfolio(cfg, ib, positions, market, rows + extra_rows, funds, manual_pending)
 
     counts = {
         "universe": len(uni), "priced": len(stocks), "liquid": len(liquid), "tt_pass": len(passers),
@@ -246,6 +274,7 @@ def full_scan(cfg: dict, notify_plan: bool = False) -> dict:
         "breakouts": sum(1 for r in rows if r["status"] in ("BREAKOUT", "BUY ZONE")),
     }
     summary = _summary(cfg, "full", market, rows, positions, counts, portfolio, _industries(rows))
+    summary["orders"] = orders.annotate(orders.load(), frames, {r["ticker"]: r for r in rows + extra_rows})
 
     pos_by_t = {p["ticker"]: p for p in positions}
     for r in rows + extra_rows:
@@ -266,14 +295,21 @@ def full_scan(cfg: dict, notify_plan: bool = False) -> dict:
     state.save()
     log.info("full scan done in %.0fs: %s", time.time() - t0, counts)
 
-    if notify_plan:
-        notify.broadcast(lambda k: notify.build_digest(summary, cfg, k, title="SEPA plan for next session"), cfg)
+    ob = orders.outbox()
+    if notify_plan or ob:
+        def build(kind):
+            alerts = notify.build_alerts(ob, cfg, kind) if ob else ""
+            plan = notify.build_digest(summary, cfg, kind, title="SEPA plan for next session") if notify_plan else ""
+            return "\n\n".join(x for x in (alerts, plan) if x)
+        if notify.broadcast(build, cfg):
+            orders.ack({m["key"] for m in ob})
     return summary
 
 
 # ---------------------------------------------------------- intraday pass
 def _events(prev: dict[str, dict], rows: list[dict], positions: list[dict], market: dict,
-            state: State, cfg: dict, day: str, portfolio: dict | None = None) -> list[dict]:
+            state: State, cfg: dict, day: str, portfolio: dict | None = None,
+            order_list: list[dict] | None = None) -> list[dict]:
     ev = []
     need_fund = cfg["fundamentals"]["require_for_top_picks"]
 
@@ -321,6 +357,12 @@ def _events(prev: dict[str, dict], rows: list[dict], positions: list[dict], mark
         if pz["stop"] > pz["initial_stop"]:
             add(f"{t}:stop:{pz['stop']}", "🛡️", t, f"raise your stop to {pz['stop']:,.2f} ({pz['stop_reason']})")
 
+    for o in order_list or []:              # pending buy orders that may need cancelling
+        if o["status"] == "PENDING":
+            for w in o.get("warnings", []):
+                add(f"order:{o['id']}:warn:{w[:24]}", "🧹", o["ticker"],
+                    f"your {orders.TYPES[o['type']].lower()} at {o.get('trigger') or o.get('limit'):,.2f}: {w}")
+
     if portfolio and portfolio.get("ibkr_stale"):
         add("ibkr:offline", "🔌", "IBKR",
             f"connection down since {portfolio['ibkr_as_of'][11:16]} ET - if IBKR Mobile shows a login request, "
@@ -334,8 +376,11 @@ def _events(prev: dict[str, dict], rows: list[dict], positions: list[dict], mark
     return ev
 
 
+@_serialised
 def intraday_refresh(cfg: dict, minutes_since_open: float | None = None, session_minutes: float = 390,
-                     force_digest: bool = False) -> dict:
+                     force_digest: bool = False, quiet: bool = False) -> dict:
+    """15-minute refresh. quiet=True recomputes without sending anything (used right after you
+    record an order on the dashboard); undelivered alerts go out on the next normal run."""
     t0 = time.time()
     scan = load_scan()
     if scan is None:
@@ -349,7 +394,7 @@ def intraday_refresh(cfg: dict, minutes_since_open: float | None = None, session
 
     prev_rows = {r["ticker"]: r for r in scan["rows"]}
     watch = scan.get("watch") or [r["ticker"] for r in _watchlist(scan["rows"], cfg["dashboard"]["watchlist_size"])]
-    pos_t = [p["ticker"] for p in pos_raw]
+    pos_t = [p["ticker"] for p in pos_raw] + _order_tickers()
     tickers = list(dict.fromkeys(watch + pos_t + [bench_sym]))
 
     store = PriceStore()
@@ -388,21 +433,28 @@ def intraday_refresh(cfg: dict, minutes_since_open: float | None = None, session
 
     rows = [fresh[t][0] if t in fresh else r for t, r in prev_rows.items()]
     rows += [fresh[t][0] for t in fresh if t not in prev_rows]
+    orders.process(frames, session_closed=minutes_since_open is None)
+    pos_raw, manual_pending = _with_orders(pos_raw)
     positions = _eval_positions(pos_raw, frames, funds, cfg, state)
-    portfolio = _portfolio(cfg, ib, positions, market, rows + [r for r, _ in extra_fresh], funds)
+    portfolio = _portfolio(cfg, ib, positions, market, rows + [r for r, _ in extra_fresh], funds, manual_pending)
 
     counts = dict(scan["summary"]["counts"])
     counts["ready"] = sum(1 for r in rows if r["status"] == "READY")
     counts["breakouts"] = sum(1 for r in rows if r["status"] in ("BREAKOUT", "BUY ZONE"))
     summary = _summary(cfg, "intraday", market, rows, positions, counts, portfolio,
                        scan["summary"].get("industries", []))
+    all_rows = {r["ticker"]: r for r in rows + [r for r, _ in extra_fresh]}
+    summary["orders"] = orders.annotate(orders.load(), frames, all_rows)
 
     pos_by_t = {p["ticker"]: p for p in positions}
     for r, di in list(fresh.values()) + extra_fresh:
         site.write_ticker(r, di, bench, funds.get(r["ticker"]), pos_by_t.get(r["ticker"]))
     site.write_summary(summary)
 
-    events = _events(prev_rows, [fresh[t][0] for t in fresh], positions, market, state, cfg, day, portfolio)
+    events = _events(prev_rows, [fresh[t][0] for t in fresh], positions, market, state, cfg, day, portfolio,
+                     summary["orders"])
+    ob = orders.outbox()
+    events = ob + [e for e in events if e["key"] not in {m["key"] for m in ob}]
     scan["summary"], scan["rows"] = summary, rows
     _save_scan(scan)
 
@@ -412,6 +464,10 @@ def intraday_refresh(cfg: dict, minutes_since_open: float | None = None, session
     send_digest = force_digest or cfg["schedule"]["send_every_run"] or bool(due)
 
     sent = False
+    if minutes_since_open is None and not force_digest:
+        quiet = True        # manual refresh while the market is closed: recompute only, send nothing
+    if quiet:
+        send_digest, events, due = False, [], []
     if send_digest:
         def build(kind):
             msg = notify.build_digest(summary, cfg, kind)
@@ -423,6 +479,7 @@ def intraday_refresh(cfg: dict, minutes_since_open: float | None = None, session
         for e in events:
             if e.get("key"):
                 state.mark_alert(e["key"], day)
+        orders.ack({m["key"] for m in ob})
         for s in due:
             state.mark_digest(s, day)
     state.save()

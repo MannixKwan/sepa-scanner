@@ -166,4 +166,6 @@ def evaluate(pos: dict, df: pd.DataFrame, cfg: dict, next_earnings: str | None =
         "signals": [{"action": a, "kind": k, "text": t} for a, k, t in sorted(signals, key=lambda s: ACTION_ORDER[s[0]])],
         "notes": pos.get("notes", ""),
         "source": pos.get("source", "file"),
+        "order_id": pos.get("order_id"),
+        "fill_estimated": bool(pos.get("fill_estimated")),
     }

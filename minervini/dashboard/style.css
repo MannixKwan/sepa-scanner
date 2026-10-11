@@ -278,3 +278,25 @@ details summary { cursor: pointer; color: var(--ink-2); font-size: 12px; margin-
 .about p { margin: 0; color: var(--ink-2); max-width: 980px; }
 .linkbtn { border: 0; background: none; padding: 0; color: var(--series-1); cursor: pointer; font: inherit; }
 .linkbtn:hover { text-decoration: underline; }
+
+/* buy orders */
+.btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--ink); padding: 7px 12px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13px; }
+.btn:hover { border-color: var(--series-1); }
+.btn.primary { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+.btn.sm { padding: 4px 9px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: default; }
+.oline { padding: 10px 0; border-bottom: 1px solid var(--grid); }
+.oline:last-of-type { border-bottom: 0; }
+.otop { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.otop .t { font-weight: 700; text-decoration: none; }
+.small { font-size: 12px; margin-top: 3px; }
+.oactions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.ostatus { font-size: 12px; color: var(--ink-2); }
+.formslot { margin-top: 10px; }
+.ogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.ogrid label, .aform label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); }
+.ogrid label.wide { grid-column: 1 / -1; }
+.ogrid input, .ogrid select, .aform input { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; }
+.aform { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-top: 8px; }
+.hint { font-size: 12px; margin: 8px 0 0; }
+.toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--border); padding: 10px 14px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.15); z-index: 60; }
