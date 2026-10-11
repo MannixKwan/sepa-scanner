@@ -250,6 +250,7 @@ def full_scan(cfg: dict, notify_plan: bool = False) -> dict:
     for r in rows + extra_rows:
         site.write_ticker(r, ind[r["ticker"]], bench, funds.get(r["ticker"]), pos_by_t.get(r["ticker"]))
     site.write_summary(summary)
+    site.prune_tickers({r["ticker"] for r in rows + extra_rows})
     # tickers the 15-minute job re-checks today: the watchlist, top picks and fresh breakouts
     watch = [r["ticker"] for r in summary["watchlist"]] + [r["ticker"] for r in summary["top_picks"]]
     watch += [r["ticker"] for r in rows if r["status"] in ("BREAKOUT", "BUY ZONE")

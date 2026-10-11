@@ -98,6 +98,16 @@ def write_ticker(row: dict, df: pd.DataFrame, bench: pd.DataFrame | None, fund: 
     write_json(SITE_DIR / "data" / "t" / f"{row['ticker']}.json", detail)
 
 
+def prune_tickers(keep: set[str]) -> int:
+    """Delete stock pages from earlier scans so an old link never shows stale analysis."""
+    removed = 0
+    for f in (SITE_DIR / "data" / "t").glob("*.json"):
+        if f.stem not in keep:
+            f.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
 def write_summary(summary: dict) -> None:
     copy_static()
     write_json(SITE_DIR / "data" / "summary.json", summary)

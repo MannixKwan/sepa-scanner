@@ -22,6 +22,7 @@ from .edgar import SecClient, fetch_financials
 
 log = logging.getLogger(__name__)
 CACHE = DATA_DIR / "fundamentals"
+SCHEMA = 3          # bump when the cached fields change: 2 = estimate revisions, 3 = business summary
 
 
 # ------------------------------------------------------------------ fetching
@@ -47,6 +48,7 @@ def _yahoo(ticker: str, want_statements: bool = False) -> dict:
         "float_shares": info.get("floatShares"),
         "inst_pct": info.get("heldPercentInstitutions"),
         "country": info.get("country") or "",
+        "summary": (info.get("longBusinessSummary") or "").strip(),
     }
 
     eps_rows, next_earn = [], None
@@ -290,8 +292,8 @@ def _fresh(path, cfg) -> dict | None:
         raw = json.loads(path.read_text())
     except Exception:
         return None
-    if "estimates" not in raw:
-        return None  # cached before estimate revisions were tracked: refetch once
+    if raw.get("schema", 0) < SCHEMA:
+        return None  # cached before the current fields existed: refetch once
     fetched = datetime.fromisoformat(raw["fetched_at"])
     if datetime.now() - fetched > timedelta(days=cfg["fundamentals"]["cache_days"]):
         return None
@@ -314,7 +316,7 @@ def get_fundamentals(ticker: str, cfg: dict, sec: SecClient, refresh: bool = Fal
             log.debug("EDGAR failed for %s: %s", ticker, e)
         if not sec_fin:
             y["statements"] = _yahoo_statements(ticker)
-        raw = {"ticker": ticker, "fetched_at": datetime.now().isoformat(timespec="seconds"),
+        raw = {"schema": SCHEMA, "ticker": ticker, "fetched_at": datetime.now().isoformat(timespec="seconds"),
                "sec": sec_fin, **y}
         path.write_text(json.dumps(raw))
     try:

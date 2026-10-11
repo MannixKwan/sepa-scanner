@@ -272,3 +272,9 @@ details summary { cursor: pointer; color: var(--ink-2); font-size: 12px; margin-
 .diagram .vb.hv { fill: var(--series-1); }
 .diagram .base { stroke: var(--axis); }
 .diagram .lead { stroke: var(--ink-2); stroke-width: 1; }
+
+/* stock page: company description */
+.about { margin-bottom: 12px; }
+.about p { margin: 0; color: var(--ink-2); max-width: 980px; }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--series-1); cursor: pointer; font: inherit; }
+.linkbtn:hover { text-decoration: underline; }

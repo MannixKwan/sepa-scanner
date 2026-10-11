@@ -553,7 +553,7 @@ async function viewDetail(t) {
   app.innerHTML = `<div class="loading">Loading ${esc(t)}…</div>`;
   let d;
   try { d = await loadDetail(t); } catch {
-    app.innerHTML = `<a class="back" href="#/">← Back</a><div class="panel empty">No analysis for ${esc(t)}. Detail pages exist for Trend Template stocks and your positions.</div>`;
+    app.innerHTML = `<a class="back" href="#/">← Back</a><div class="panel empty">No current analysis for ${esc(t)}. It no longer passes the Trend Template, so it has dropped off the list. Stock pages exist for current Trend Template stocks and your positions.</div>`;
     return;
   }
   const r = d.row, f = d.fundamentals;
@@ -567,6 +567,7 @@ async function viewDetail(t) {
       <div class="price"><b class="num">${fmt.px(r.price)}</b> <span class="num ${dir(r.change_pct)}">${fmt.pct(r.change_pct)}</span>
         <div class="muted">${esc(r.date)} · RS ${r.rs ?? "–"} · score ${r.score}</div></div>
     </div>
+    ${aboutPanel(f?.profile)}
     <div class="grid two">
       <div class="panel chartbox">
         <div class="legend" id="lg"></div>
@@ -589,6 +590,18 @@ async function viewDetail(t) {
       </div>
     </div>`;
   drawCharts(d);
+}
+
+/* "About": what the company does - first two sentences, the rest behind "Read more" */
+function aboutPanel(profile) {
+  const text = (profile?.summary || "").trim();
+  if (!text) return "";
+  const parts = text.split(/(?<=[.!?])\s+(?=[A-Z])/);
+  const lead = parts.slice(0, 2).join(" "), rest = parts.slice(2).join(" ");
+  return `<section class="panel about">
+    <h3>About ${esc(profile.name || "")}</h3>
+    <p>${esc(lead)}${rest ? ` <span class="more" hidden>${esc(rest)}</span> <button class="linkbtn" onclick="const m=this.previousElementSibling; m.hidden=!m.hidden; this.textContent=m.hidden?'Read more':'Show less'">Read more</button>` : ""}</p>
+  </section>`;
 }
 
 function planPanel(r) {
