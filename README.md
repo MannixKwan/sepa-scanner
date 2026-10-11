@@ -229,8 +229,13 @@ Don't also run `minervini run` on your Mac once the server is live, or you'll ge
 * **Alerts, at once:** a breakout through a pivot (fundamentals must pass), a stock within 1.5% of its
   pivot, a failed breakout, any exit signal on your positions, a stop to raise, or a change in market
   status. Each alert goes out at most once per stock per day.
-* **Digest:** at 09:45, 12:30 and 15:45 New York time, plus a "plan for next session" after the nightly
-  scan. Set `schedule.send_every_run: true` to get the full digest every 15 minutes.
+* **Breakouts are graded by volume.** Intraday, today's volume is projected from the stock's own
+  5-minute pattern at the same time of day (last 10 sessions) and compared with the 50-day average:
+  🔥 *power* (≥ 2× with the price up ≥ 2%), 🚀 *confirmed* (≥ 1.4×) or 👀 *light* (wait). A light
+  breakout that later confirms, or a confirmed one that turns into a power breakout, sends one upgrade
+  alert.
+* **Digest:** at 09:45 and 12:30 New York time (21:45 and 00:30 HKT), plus a "plan for next session"
+  after the nightly scan. Set `schedule.send_every_run: true` to get the full digest every 15 minutes.
 
 ## Data caveats
 * Yahoo Finance is free but unofficial; prices can be ~15 min delayed and the API can change. If

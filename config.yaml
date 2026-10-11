@@ -29,7 +29,9 @@ vcp:
 trade:
   buy_zone_pct: 0.05           # buy only up to 5% above the pivot
   max_stop_pct: 0.08           # setups needing a wider stop aren't low-risk: shown, but not in Stocks to watch
-  breakout_volume_ratio: 1.4   # want breakout volume >= 140% of average
+  breakout_volume_ratio: 1.4   # breakout volume >= 140% of average = confirmed (graded on time of day intraday)
+  power_breakout_volume: 2.0   # >= 2x normal volume with the price up >= 2% = power breakout
+  power_breakout_move: 0.02
 
 risk:                          # position sizing & progressive exposure (Minervini's rules, your numbers)
   capital_source: ibkr         # ibkr = size off your IBKR net liquidation (USD); fixed = account_equity
@@ -70,7 +72,7 @@ ibkr:
 schedule:
   interval_minutes: 15
   full_scan_after_close_minutes: 45
-  digest_times_et: ["09:45", "12:30", "15:45"]   # full digest at these New York times
+  digest_times_et: ["09:45", "12:30"]   # full digest at these New York times (21:45 / 00:30 HKT)
   send_every_run: false        # true = full digest every 15 minutes (alerts are always immediate)
   evening_plan: true           # send "plan for next session" after the nightly scan
 

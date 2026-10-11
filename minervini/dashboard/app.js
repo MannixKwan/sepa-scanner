@@ -44,6 +44,8 @@ const GRADE_HELP = {
   E: "Heavy distribution: repeated big-volume selling days.",
 };
 const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
+const BO = { power: ["good", "🔥 Power breakout"], confirmed: ["good", "Volume-confirmed breakout"], light: ["warning", "Light-volume breakout"] };
+const boChip = (b) => (b ? chip(BO[b.strength][0], `${BO[b.strength][1]} · ${b.volume_ratio.toFixed(1)}×`, b.basis) : "");
 const gradeOf = (r) => r.volume_profile?.grade ?? r.acc_grade;
 const gradeChip = (g) => (g ? chip(GRADE_KIND[g] || "", g, GRADE_HELP[g] || "") : "–");
 const chip = (kind, text, title = "") => `<span class="chip ${kind}" title="${esc(title)}"><span class="dot"></span>${esc(text)}</span>`;
@@ -141,7 +143,7 @@ function pickCard(r) {
       <div><div class="tk">${esc(r.ticker)}</div><div class="nm" title="${esc(r.name)}">${esc(r.name)}</div></div>
       <div class="px"><b class="num">${fmt.px(r.price)}</b><div class="num ${dir(r.change_pct)}">${fmt.pct(r.change_pct)}</div></div>
     </div>
-    <div class="facts">${statusChip(r.status)}<span class="tag">${pivotText(r)}</span><span class="tag">Score ${r.score}</span>${gradeOf(r) ? `<span class="tag" title="${esc(GRADE_HELP[gradeOf(r)])}">Volume ${gradeOf(r)}</span>` : ""}${s.base_number ? `<span class="tag" title="Base count in this advance - 1st and 2nd stage bases have the best odds">${ordinal(s.base_number)}-stage base</span>` : ""}</div>
+    <div class="facts">${statusChip(r.status)}${boChip(r.breakout)}<span class="tag">${pivotText(r)}</span><span class="tag">Score ${r.score}</span>${gradeOf(r) ? `<span class="tag" title="${esc(GRADE_HELP[gradeOf(r)])}">Volume ${gradeOf(r)}</span>` : ""}${s.base_number ? `<span class="tag" title="Base count in this advance - 1st and 2nd stage bases have the best odds">${ordinal(s.base_number)}-stage base</span>` : ""}</div>
     ${meter(p.stop, p.entry, p.buy_zone_hi, r.price)}
     <div class="kv num">
       <div><div class="k">Buy above</div><div class="v">${fmt.px(p.entry)}</div></div>
@@ -503,7 +505,10 @@ function viewRules() {
   <h2>4 · Entering a trade</h2>
   <ol>
     <li>The buy point is the <b>pivot line</b> - computed for you. Before the open, a SEPA trader places a <b>buy-stop</b> a few cents above it.</li>
-    <li>Only count the breakout on volume ≥ <b>${tr.breakout_volume_ratio}×</b> the 50-day average (the app flags light-volume breakouts).</li>
+    <li>Volume decides how much a breakout is worth. During the day the app projects today's volume from <b>this stock's own pattern at the same time of day</b> (last 10 sessions) and compares it with the 50-day average:
+      ${chip("good", "🔥 Power")} ≥ ${tr.power_breakout_volume}× normal volume with the price up ≥ ${P(tr.power_breakout_move)} - the strongest signal;
+      ${chip("good", "Confirmed")} ≥ ${tr.breakout_volume_ratio}×;
+      ${chip("warning", "Light")} below that - wait. A light breakout that confirms later sends an upgrade alert.</li>
     <li>Never pay more than <b>Max buy</b> (pivot + ${P(tr.buy_zone_pct)}); above that it's Extended - wait for the next base.</li>
     <li>The stop goes just under the last contraction's low. If that's more than ${P(tr.max_stop_pct)} below the pivot, it isn't a low-risk entry: the stock stays on the watchlist with a warning but is left out of Stocks to watch until it tightens.</li>
     <li>Avoid opening a position in the days before an earnings report, and don't buy when the market is in correction.</li>
@@ -621,7 +626,9 @@ function planPanel(r) {
       <dt>Risk at stop</dt><dd>${fmt.usd(p.risk_amount)}${p.sizing ? ` (${fmt.pct(p.sizing.risk_pct_capital, 2, false)})` : ""}</dd>
       <dt>Targets</dt><dd>2R ${fmt.px(p.targets["2R"])} · 3R ${fmt.px(p.targets["3R"])}</dd>
       <dt></dt><dd>+20% ${fmt.px(p.targets["+20%"])} · +25% ${fmt.px(p.targets["+25%"])}</dd>
-      <dt>Volume pace today</dt><dd>${r.vol_ratio}× avg</dd>
+      <dt>Volume today</dt><dd>${r.vol_ratio}× normal</dd>
+      <dt></dt><dd class="muted" style="font-weight:400">${esc(r.vol_basis || "")}</dd>
+      ${r.breakout ? `<dt>Breakout</dt><dd>${boChip(r.breakout)}<div class="muted" style="font-weight:400">${r.breakout.days_ago ? esc(r.breakout.date) + " · " : "today · "}${fmt.pct(r.breakout.change, 1)} on the day</div></dd>` : ""}
       ${r.next_earnings ? `<dt>Next earnings</dt><dd>${esc(r.next_earnings)}${r.days_to_earnings != null ? ` (${r.days_to_earnings}d)` : ""}</dd>` : ""}
     </dl>
     <p class="muted" style="margin-top:8px">Sized for your portfolio: ${fmt.usd(st.equity)} capital, ${esc(S.portfolio?.mode_label || "")} mode (${fmt.pct(st.risk_per_trade_pct, 2, false)} risk per trade). <a href="#/portfolio">Portfolio →</a></p>

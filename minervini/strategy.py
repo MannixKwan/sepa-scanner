@@ -67,7 +67,8 @@ def trade_plan(setup: dict, price: float, cfg: dict, equity: float) -> dict:
 def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
             fund: dict | None = None, bench: pd.DataFrame | None = None,
             vol_fraction: float = 1.0, equity: float | None = None,
-            market: dict | None = None, industry_rank: dict | None = None) -> dict:
+            market: dict | None = None, industry_rank: dict | None = None,
+            vol_basis: str = "full day vs 50-day average") -> dict:
     """Full analysis of one ticker. `df` carries indicators; its last row is the current bar
     (possibly partial: `vol_fraction` is how much of the day's volume has normally traded)."""
     equity = equity or cfg["risk"]["account_equity"]
@@ -107,6 +108,23 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
     price_new_high = bool(df["high"].iloc[-1] >= df["high"].iloc[-252:].max())
 
     sma50_falling = bool(len(df) > 70 and df["sma50"].iloc[-1] < df["sma50"].iloc[-22])
+
+    # Breakout volume: a price spike through the pivot on heavy volume is the strongest signal.
+    breakout = None
+    if status in ("BREAKOUT", "BUY ZONE") and setup and setup.get("breakout_days_ago") is not None:
+        ago = setup["breakout_days_ago"]
+        if ago == 0:
+            b_ratio, b_chg, b_date, b_basis = vol_ratio, price / prev_close - 1, df.index[-1], vol_basis
+        else:
+            i = len(df) - 1 - ago
+            prior = df["vol50"].iloc[i - 1] if i > 0 else None
+            b_ratio = float(df["volume"].iloc[i] / prior) if prior else 0.0
+            b_chg = float(df["close"].iloc[i] / df["close"].iloc[i - 1] - 1) if i > 0 else 0.0
+            b_date, b_basis = df.index[i], "breakout day vs 50-day average"
+        strength = ("power" if b_ratio >= tr["power_breakout_volume"] and b_chg >= tr["power_breakout_move"]
+                    else "confirmed" if b_ratio >= tr["breakout_volume_ratio"] else "light")
+        breakout = {"days_ago": ago, "date": b_date.strftime("%Y-%m-%d"), "volume_ratio": round(float(b_ratio), 2),
+                    "change": round(float(b_chg), 4), "strength": strength, "basis": b_basis}
     vp = volume_profile(df, cfg, exclude_last=vol_fraction < 1.0)
     m = (fund or {}).get("metrics", {})
     days_to_earn = _days_until((fund or {}).get("next_earnings"))
@@ -129,6 +147,8 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
         score -= min(10, 5 * (base_no - late + 1))
     if plan and plan["too_wide"]:
         score -= 10
+    if breakout:
+        score += {"power": 6, "confirmed": 3, "light": -4}[breakout["strength"]]
     score = int(round(max(0, min(score, 100))))
 
     # ------------------------------------------------------- why / red flags
@@ -139,6 +159,11 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
         reasons.append(f"RS rating {rs} - outperforming {rs}% of NASDAQ stocks")
     if rs_new_high:
         reasons.append("RS line at a new high" + (" ahead of price (leadership tell)" if not price_new_high else ""))
+    if breakout and breakout["strength"] != "light":
+        when = "today" if breakout["days_ago"] == 0 else f"on {breakout['date']}"
+        label = "Power breakout" if breakout["strength"] == "power" else "Breakout confirmed by volume"
+        reasons.append(f"{label} {when}: {breakout['change']:+.1%} on {breakout['volume_ratio']:.1f}× normal volume "
+                       f"({breakout['basis']})")
     if setup and setup["valid"]:
         dep = " → ".join(f"{d:.0%}" for d in setup["depths"])
         reasons.append(f"{setup['count']}-contraction VCP over {setup['base_weeks']:g} weeks: {dep}")
@@ -181,8 +206,12 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
                      f"{b['change']:+.1%} on {b['ratio']:.1f}× average)")
     if status == "EXTENDED":
         flags.append("Extended beyond the buy zone - don't chase")
-    if status in ("BREAKOUT", "BUY ZONE") and setup and setup.get("breakout_days_ago") == 0 and vol_ratio < tr["breakout_volume_ratio"]:
-        flags.append(f"Breakout volume light so far ({vol_ratio:.1f}× average pace; want ≥ {tr['breakout_volume_ratio']:.1f}×)")
+    if breakout and breakout["strength"] == "light":
+        if breakout["days_ago"] == 0:
+            flags.append(f"Breakout volume light so far ({breakout['volume_ratio']:.1f}× normal, {breakout['basis']}; "
+                         f"want ≥ {tr['breakout_volume_ratio']:.1f}×) - wait for volume to confirm")
+        else:
+            flags.append(f"Broke out on light volume ({breakout['volume_ratio']:.1f}× on {breakout['date']}) - less reliable")
     if plan and plan["too_wide"]:
         flags.append(f"Stop would be {plan['risk_pct']:.1%} below the pivot - over the {tr['max_stop_pct']:.0%} maximum; "
                      "not a low-risk entry until it tightens (left out of Stocks to watch)")
@@ -210,6 +239,8 @@ def analyze(ticker: str, df: pd.DataFrame, rs: int | None, cfg: dict, *,
         "change_pct": round(price / prev_close - 1, 4),
         "volume": int(last["volume"]),
         "vol_ratio": round(vol_ratio, 2),
+        "vol_basis": vol_basis,
+        "breakout": breakout,
         "date": df.index[-1].strftime("%Y-%m-%d"),
         "rs": rs,
         "rs_new_high": rs_new_high,

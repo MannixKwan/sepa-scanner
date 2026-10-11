@@ -90,6 +90,9 @@ def _pick_lines(f: Fmt, r: dict, k: int) -> list[str]:
         facts.append(f"Sales {_p(m['sales_q_yoy'])}")
     if r.get("setup"):
         facts.append(f"VCP {r['setup']['count']}T")
+    if r.get("breakout"):
+        b = r["breakout"]
+        facts.append(f"{'🔥 ' if b['strength'] == 'power' else ''}breakout vol {b['volume_ratio']:.1f}× ({b['strength']})")
     if r.get("volume_profile"):
         facts.append(f"Vol {r['volume_profile']['grade']}")
     if (r.get("setup") or {}).get("base_number"):

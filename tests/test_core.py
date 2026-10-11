@@ -90,6 +90,14 @@ class VcpTest(unittest.TestCase):
         self.assertLessEqual(p["risk_pct"], CFG["trade"]["max_stop_pct"] + 1e-9)
         self.assertGreater(r["vol_ratio"], 1.4)
 
+    def test_breakout_volume_grades(self):
+        for vol, want in [(2.6e6, "power"), (1.5e6, "confirmed"), (0.9e6, "light")]:
+            df = vcp_series(breakout=True)
+            df.iloc[-1, df.columns.get_loc("volume")] = vol
+            r = analyze("TEST", add_indicators(df), 95, CFG)
+            self.assertEqual(r["status"], "BREAKOUT")
+            self.assertEqual(r["breakout"]["strength"], want, (vol, r["breakout"]))
+
     def test_breakout_two_days_ago_is_buy_zone(self):
         df = vcp_series(breakout=True)
         extra = frame([98.6, 99.0], [1.5e6, 1.2e6], start=(df.index[-1] + pd.offsets.BDay(1)).strftime("%Y-%m-%d"))
@@ -214,6 +222,40 @@ class ExitRulesTest(unittest.TestCase):
         entry_date = df.index[250].strftime("%Y-%m-%d")
         p = evaluate({"ticker": "X", "shares": 10, "entry_price": 100, "stop": 93, "entry_date": entry_date}, df, CFG)
         self.assertIn("time_stop", [s["kind"] for s in p["signals"]])
+
+
+class BreakoutAlertTest(unittest.TestCase):
+    class FakeState:
+        def __init__(self):
+            self.sent, self.kv = set(), {}
+        def alerted(self, key, day): return key in self.sent
+        def mark_alert(self, key, day): self.sent.add(key)
+        def get(self, k, default=None): return self.kv.get(k, default)
+        def set(self, k, v): self.kv[k] = v
+
+    def _row(self, strength, ratio):
+        return {"ticker": "XYZ", "status": "BREAKOUT", "price": 101.0, "pivot_dist": 0.01, "vol_ratio": ratio,
+                "fund_pass": True, "plan": {"entry": 100.0, "buy_zone_hi": 105.0, "stop": 95.0, "too_wide": False},
+                "breakout": {"strength": strength, "volume_ratio": ratio, "change": 0.025}}
+
+    def test_light_then_confirmed_sends_one_upgrade(self):
+        from minervini.pipeline import _events
+        st, market = self.FakeState(), {"regime": "uptrend", "label": "Up", "guidance": ""}
+        def run(strength, ratio):
+            ev = _events({}, [self._row(strength, ratio)], [], market, st, CFG, "2026-10-12")
+            for e in ev:
+                st.mark_alert(e["key"], "2026-10-12")
+            return ev
+        first = run("light", 0.9)
+        self.assertEqual(len(first), 1)
+        self.assertIn("wait for volume", first[0]["text"])
+        up = run("confirmed", 1.6)
+        self.assertEqual(len(up), 1)
+        self.assertIn("now confirmed", up[0]["text"])
+        self.assertEqual(run("confirmed", 1.7), [])     # no repeats
+        self.assertEqual(run("light", 1.2), [])         # never downgrades
+        power = run("power", 2.4)
+        self.assertIn("POWER BREAKOUT (upgrade)", power[0]["text"])
 
 
 class FundamentalsTest(unittest.TestCase):

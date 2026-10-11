@@ -23,7 +23,7 @@ from .ibkr import fetch_portfolio
 from .market import breadth_stats, market_regime
 from .marketclock import Market
 from .positions import ACTION_ORDER, evaluate, load_file_positions, merge_positions
-from .prices import PriceStore, session_volume_fraction, with_live_bars
+from .prices import PriceStore, intraday_volume_profile, session_volume_fraction, with_live_bars
 from .state import State
 from .strategy import STATUS_HELP, STATUS_ORDER, analyze, top_picks
 from .technicals import add_indicators, rs_ratings, rs_raw, trend_template
@@ -225,10 +225,11 @@ def full_scan(cfg: dict, notify_plan: bool = False) -> dict:
 
     prog = Market().progress()   # scan run during market hours: today's bar is still partial
     vf = session_volume_fraction(*prog) if prog else 1.0
+    basis = "projected from a typical intraday curve" if prog else "full day vs 50-day average"
 
     def run(t):
         r = analyze(t, ind[t], ratings.get(t), cfg, fund=funds.get(t), bench=bench, vol_fraction=vf,
-                    market=market, industry_rank=ind_counts)
+                    market=market, industry_rank=ind_counts, vol_basis=basis)
         if r["name"] == t and t in names:
             r["name"] = names[t]
         return r
@@ -287,9 +288,25 @@ def _events(prev: dict[str, dict], rows: list[dict], positions: list[dict], mark
         if p.get("too_wide") and r["status"] != "FAILED":
             continue   # not a low-risk entry - don't alert on it
         if r["status"] == "BREAKOUT":
-            add(f"{t}:breakout", "🚀", t,
-                f"breaking out: {r['price']:,.2f} vs pivot {p['entry']:,.2f} ({r['pivot_dist']:+.1%}) · "
-                f"volume pace {r['vol_ratio']:.1f}× · buy up to {p['buy_zone_hi']:,.2f} · stop {p['stop']:,.2f}")
+            # graded by volume; a later, stronger grade the same day sends an upgrade alert
+            b = r.get("breakout") or {"strength": "light", "volume_ratio": r["vol_ratio"], "change": 0.0}
+            rank = {"light": 0, "confirmed": 1, "power": 2}
+            sent = max((rank[k] for k in rank if state.alerted(f"{t}:bo:{k}", day)), default=-1)
+            if rank[b["strength"]] > sent:
+                vol = f"volume {b['volume_ratio']:.1f}× normal for this time of day"
+                tail = f"buy up to {p['buy_zone_hi']:,.2f} · stop {p['stop']:,.2f}"
+                if b["strength"] == "power":
+                    add(f"{t}:bo:power", "🔥", t,
+                        f"POWER BREAKOUT{' (upgrade)' if sent >= 0 else ''}: {r['price']:,.2f} ({b['change']:+.1%} today), "
+                        f"{r['pivot_dist']:+.1%} through pivot {p['entry']:,.2f} · {vol} · {tail}")
+                elif b["strength"] == "confirmed":
+                    add(f"{t}:bo:confirmed", "🚀", t,
+                        f"breakout {'now ' if sent >= 0 else ''}confirmed by volume: {r['price']:,.2f}, "
+                        f"{r['pivot_dist']:+.1%} through pivot {p['entry']:,.2f} · {vol} · {tail}")
+                else:
+                    add(f"{t}:bo:light", "👀", t,
+                        f"crossing pivot {p['entry']:,.2f} at {r['price']:,.2f}, but {vol} so far - wait for volume "
+                        "to confirm (you'll get another alert if it does)")
         elif r["status"] == "READY" and (r.get("pivot_dist") or -1) >= -0.015:
             add(f"{t}:near", "🎯", t,
                 f"within {abs(r['pivot_dist']):.1%} of pivot {p['entry']:,.2f} - buy-stop above it, stop {p['stop']:,.2f}")
@@ -341,6 +358,8 @@ def intraday_refresh(cfg: dict, minutes_since_open: float | None = None, session
     vf = 1.0 if minutes_since_open is None else session_volume_fraction(minutes_since_open, session_minutes)
 
     market = market_regime(bench, scan["summary"]["market"].get("breadth"), bench_sym)
+    # each stock's own intraday volume profile: how much of a normal day has traded by now
+    vprof = intraday_volume_profile(list(dict.fromkeys(watch + pos_t))) if minutes_since_open is not None else {}
     sec = SecClient(cfg["secrets"]["sec_user_agent"])
     funds = {t: f for t in dict.fromkeys(watch + pos_t)
              if (f := get_fundamentals(t, cfg, sec)) is not None}
@@ -352,8 +371,14 @@ def intraday_refresh(cfg: dict, minutes_since_open: float | None = None, session
         if df is None or len(df) < 60:
             continue
         di = add_indicators(df)
-        r = analyze(t, di, ratings.get(t), cfg, fund=funds.get(t), bench=bench, vol_fraction=vf,
-                    market=market, industry_rank=ind_counts)
+        prof = vprof.get(t)
+        if prof:
+            vf_t, basis = prof["fraction"], f"time of day ({prof['as_of']} ET vs its last {prof['sessions']} sessions)"
+        else:
+            vf_t = vf
+            basis = "projected from a typical intraday curve" if minutes_since_open is not None else "full day vs 50-day average"
+        r = analyze(t, di, ratings.get(t), cfg, fund=funds.get(t), bench=bench, vol_fraction=vf_t,
+                    market=market, industry_rank=ind_counts, vol_basis=basis)
         if t in prev_rows and r["name"] == t:
             r["name"] = prev_rows[t]["name"]
         if t in prev_rows or r["tt"]["passed"]:

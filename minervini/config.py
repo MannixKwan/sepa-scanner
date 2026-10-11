@@ -55,7 +55,9 @@ DEFAULTS: dict = {
     "trade": {
         "buy_zone_pct": 0.05,           # never chase > 5% above the pivot
         "max_stop_pct": 0.08,           # cap stop at 8% below entry
-        "breakout_volume_ratio": 1.4,   # breakout volume >= 140% of 50-day average
+        "breakout_volume_ratio": 1.4,   # breakout volume >= 140% of 50-day average = confirmed
+        "power_breakout_volume": 2.0,   # >= 2x normal volume...
+        "power_breakout_move": 0.02,    # ...with the price up >= 2% on the day = power breakout
     },
     "risk": {                           # position sizing & progressive exposure (allocation.py)
         "capital_source": "ibkr",       # ibkr = IBKR net liquidation; fixed = account_equity below
@@ -104,7 +106,7 @@ DEFAULTS: dict = {
     "schedule": {
         "interval_minutes": 15,
         "full_scan_after_close_minutes": 45,
-        "digest_times_et": ["09:45", "12:30", "15:45"],
+        "digest_times_et": ["09:45", "12:30"],
         "send_every_run": False,        # True = full digest every 15 minutes
         "evening_plan": True,           # send tomorrow's plan after the full scan
     },

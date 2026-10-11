@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import pickle
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -156,3 +157,54 @@ _VOL_CURVE_PCT = np.array([0, .08, .13, .21, .28, .34, .45, .56, .66, .80, .88, 
 def session_volume_fraction(minutes_since_open: float, session_minutes: float = 390) -> float:
     m = float(np.clip(minutes_since_open * 390.0 / max(session_minutes, 1), 0, 390))
     return float(max(np.interp(m, _VOL_CURVE_MIN, _VOL_CURVE_PCT), 0.03))
+
+
+ET = ZoneInfo("America/New_York")
+
+
+def intraday_volume_profile(tickers: list[str], lookback: int = 10) -> dict[str, dict]:
+    """Per-stock intraday volume profile from 5-minute bars. For each ticker: `fraction` = the share
+    of a full day's volume this stock has typically traded by the current clock time (average of the
+    previous `lookback` sessions), and `rvol10` = today's volume so far vs those sessions' volume by
+    the same time. Today's projected volume = volume so far / fraction, which is then compared with
+    the 50-day average (Minervini's breakout yardstick). Returns {} on any data problem."""
+    out: dict[str, dict] = {}
+    tickers = list(dict.fromkeys(tickers))
+    if not tickers:
+        return out
+    try:
+        raw = yf.download(tickers, period=f"{lookback + 3}d", interval="5m", group_by="ticker",
+                          auto_adjust=False, actions=False, progress=False, threads=True,
+                          prepost=False, timeout=30)
+    except Exception as e:
+        log.warning("intraday download failed: %s", e)
+        return out
+    today_et = datetime.now(ET).date()
+    for t in tickers:
+        try:
+            sub = raw[t] if isinstance(raw.columns, pd.MultiIndex) else raw
+            vol = sub["Volume"].dropna()
+        except KeyError:
+            continue
+        if vol.empty:
+            continue
+        idx = vol.index.tz_convert(ET) if vol.index.tz is not None else vol.index.tz_localize(ET)
+        days = np.array(idx.date)
+        mins = np.array(idx.hour * 60 + idx.minute) - 570          # minutes since 09:30
+        v = vol.to_numpy(float)
+        if days[-1] != today_et:
+            continue                                                 # no bars for today yet
+        cut = mins[days == today_et].max()
+        today_cum = v[days == today_et].sum()
+        fracs, cums = [], []
+        for d in sorted(x for x in set(days) if x < today_et)[-lookback:]:
+            total, by_now = v[days == d].sum(), v[(days == d) & (mins <= cut)].sum()
+            if total > 0 and by_now > 0:
+                fracs.append(by_now / total)
+                cums.append(by_now)
+        if len(fracs) < 3:
+            continue
+        end = 570 + cut + 5
+        out[t] = {"fraction": round(float(np.mean(fracs)), 4), "rvol10": round(float(today_cum / np.mean(cums)), 2),
+                  "as_of": f"{end // 60:02d}:{end % 60:02d}", "sessions": len(fracs)}
+    return out
